@@ -1,0 +1,7 @@
+# dsh-booster bundle patch: mount the host plugin under its package name,
+# resolved through the profile's node_modules. The client half ships in the
+# same package (exports["./client"]) and registers its settings page plus the
+# modules enabled in the `booster` settings namespace.
+- insert:
+    - id: dsh-booster
+      name: dsh-booster

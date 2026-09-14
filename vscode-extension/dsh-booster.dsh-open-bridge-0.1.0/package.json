@@ -1,0 +1,19 @@
+{
+  "name": "dsh-open-bridge",
+  "displayName": "DSH open bridge",
+  "description": "Opens, in this window, the file that DSH just wrote or edited.",
+  "version": "0.1.0",
+  "publisher": "dsh-booster",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./extension.js",
+  "contributes": {}
+}

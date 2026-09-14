@@ -1,0 +1,24 @@
+# Line-ending policy: LF everywhere, for every platform.
+#
+# Git for Windows defaults to `core.autocrlf=true`, which rewrites LF to CRLF in the
+# working tree. Then the repository's line endings depend on who committed last, and
+# an LF-only source file can arrive on someone else's machine as CRLF. This file plus
+# `core.autocrlf=false` pin it: what is committed is what everyone gets.
+#
+# The PowerShell scripts are LF too, deliberately. PowerShell 5.1 runs LF scripts
+# fine — the AST parser and the scripts themselves were both exercised on LF-only
+# files. Only `*.ps1` was ever at risk of looking "wrong" in Notepad, which is not a
+# reason to make the whole repository platform-dependent.
+* text=auto eol=lf
+
+# Genuinely binary files: never normalise, never diff as text.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.zip binary
+*.exe binary
+
+# Lockfiles are generated and large; keep them out of diffs.
+package-lock.json -diff linguist-generated
