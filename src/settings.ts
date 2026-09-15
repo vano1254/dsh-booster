@@ -62,6 +62,14 @@ export interface PreviewSettings {
    * file writes with nowhere to appear.
    */
   codeServer: CodeServerState
+  /**
+   * An address typed by hand into the panel, or an empty string to follow links.
+   *
+   * While this is set the panel shows it and stops following the agent's links, so a
+   * page the user is reading is not replaced by the next URL in a reply. Submitting an
+   * empty field restores following.
+   */
+  url: string
 }
 
 /** The whole `booster` settings section. */
@@ -100,6 +108,7 @@ export const DEFAULT_PREVIEW: PreviewSettings = {
   linkMode: 'all',
   fileOpen: 'vscode',
   codeServer: 'unknown',
+  url: '',
 }
 
 /** Every selectable accent, in menu order; labels live in the client locale. */

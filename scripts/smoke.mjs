@@ -670,7 +670,7 @@ check(
 chatValue = { legacy: { runningCalls: [], nodes: [replyWith(1, 'see https://example.com/a then https://example.com/b')] } }
 renderWatcher()
 check('a link in a reply opens the web panel', openTabCalls.length === 1 && openTabCalls[0]?.kind === PREVIEW_KIND)
-check('the panel shows the newest link, not the first', collectText(renderBody()).includes('https://example.com/b'))
+check('the panel shows the newest link, not the first', collectValue(renderBody(), 'value').includes('https://example.com/b'))
 check('the panel frames the page', collectValue(renderBody(), 'src').includes('https://example.com/b'))
 check('the panel offers an outside-browser escape hatch', collectTypes(renderBody()).has('a'))
 
@@ -681,7 +681,7 @@ const beforeServiceLink = openTabCalls.length
 chatValue = { legacy: { runningCalls: [], nodes: [replyWith(2, 'open http://127.0.0.1:8443/?folder=/C:/nope to get VS Code')] } }
 renderWatcher()
 check('the Sidebar service address is not followed as a link', openTabCalls.length === beforeServiceLink)
-check('the panel keeps showing the last real link', collectText(renderBody()).includes('https://example.com/b'))
+check('the panel keeps showing the last real link', collectValue(renderBody(), 'value').includes('https://example.com/b'))
 
 // Regression: a frame that hides its referrer from the site gets refused by
 // embedded players (YouTube reports it as error 153), and an over-tight sandbox
@@ -743,6 +743,25 @@ check('accent layer carries light+dark brand tokens', (() => {
   return typeof brand?.light === 'string' && typeof brand?.dark === 'string'
 })())
 check('re-enabling the module registers the tab type again', tabsRegistered.length >= 2)
+
+// The address field: a typed address is what the panel shows, and it is not replaced
+// by whatever link happens to come next.
+scopeValue = {
+  modules: { preview: true, appearance: true, headerTools: true },
+  preview: { linkMode: 'all', fileOpen: 'preview', codeServer: 'have', url: 'https://example.com/typed' },
+}
+for (const listener of [...scopeListeners]) listener()
+
+const typedBody = liveRegistration((r) => r.options.key === PREVIEW_ID)
+const typedTree = mount(typedBody.component, { sessionId: 'sess-1' })
+check('a hand-typed address is what the panel loads', collectValue(typedTree, 'src').includes('https://example.com/typed'))
+check('the panel offers an editable address field', collectTypes(typedTree).has('input'))
+
+const typedWatcher = liveRegistration((r) => r.options.id === 'dsh-booster-preview-watch')
+const openedBeforeTyped = openTabCalls.length
+chatValue = { legacy: { runningCalls: [], nodes: [replyWith(9, 'https://example.com/ignored')] } }
+mount(typedWatcher.component, { useChat: useChatStub, sessionId: 'sess-1' })
+check('a typed address is not replaced by a later link', openTabCalls.length === openedBeforeTyped)
 
 // The bridge is chosen but no service answered: a written file still has to appear
 // somewhere. Re-apply with exactly that configuration and watch where it opens.

@@ -45,5 +45,6 @@ export const BoosterSchema = Schema.object({
     linkMode: Schema.union(LINK_MODES.map((mode) => Schema.const(mode))).default(DEFAULT_PREVIEW.linkMode),
     fileOpen: Schema.union(FILE_OPEN_TARGETS.map((target) => Schema.const(target))).default(DEFAULT_PREVIEW.fileOpen),
     codeServer: Schema.union(CODE_SERVER_STATES.map((state) => Schema.const(state))).default(DEFAULT_PREVIEW.codeServer),
+    url: Schema.string().default(DEFAULT_PREVIEW.url),
   }).default({ ...DEFAULT_PREVIEW }),
 })

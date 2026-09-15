@@ -73,6 +73,10 @@ export const zh: Record<string, string> = {
   'preview.codeServer.recheck': '我装好了，重新检测',
   'preview.codeServer.useBuiltin': '用产品自带预览器',
   'preview.codeServer.useVscode': '改回在右侧 VS Code 打开',
+  'preview.address': '网址',
+  'preview.addressPlaceholder': '输入或粘贴网址，回车加载',
+  'preview.addressGo': '加载',
+  'preview.addressFollow': '跟随链接',
   'unit.px': 'px',
 }
 
@@ -137,6 +141,10 @@ export const en: Record<string, string> = {
   'preview.codeServer.recheck': 'I installed it — check again',
   'preview.codeServer.useBuiltin': 'Use the built-in previewer',
   'preview.codeServer.useVscode': 'Open in the Sidebar VS Code again',
+  'preview.address': 'Address',
+  'preview.addressPlaceholder': 'Type or paste a URL, then press Enter',
+  'preview.addressGo': 'Load',
+  'preview.addressFollow': 'Follow links',
   'unit.px': 'px',
 }
 

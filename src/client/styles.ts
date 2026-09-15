@@ -132,6 +132,19 @@ export const HEADER_TOOLS_CSS = `
 /** Web-panel chrome: the referenced page fills the pane. */
 export const PREVIEW_CSS = `
 .booster-preview { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.booster-preview__address { display: flex; flex: 1 1 auto; min-width: 0; align-items: center; gap: 4px; }
+.booster-preview__input {
+  appearance: none;
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 1px solid var(--dsw-alias-border-l1);
+  background: var(--dsw-alias-bg-layer-2);
+  color: var(--dsw-alias-label-primary);
+  border-radius: 6px;
+  padding: 3px 7px;
+  font-size: 11px;
+}
+.booster-preview__input:focus { outline: none; border-color: var(--dsw-alias-brand-primary); }
 .booster-preview__head {
   display: flex; align-items: center; gap: 8px; flex: 0 0 auto;
   padding: 7px 10px; border-bottom: 1px solid var(--dsw-alias-border-l1);

@@ -8,6 +8,11 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- An **editable address field** in the web panel. It shows the address in force — a
+  followed link included, so the panel never hides what it is showing — and a typed
+  address **pins** the panel until "follow links" hands it back, so the page you are
+  reading is not replaced by the next URL in a reply. The typed address is remembered
+  in `preview.url`.
 - `preview`: writing or editing a file opens it in the product's own document
   preview, and a link in the agent's reply opens in a web panel this plugin owns.
 - A fullscreen control in that panel, because a ~300px Sidebar column is narrower

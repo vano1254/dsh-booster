@@ -335,6 +335,8 @@ interface WatcherProps {
   fileOpen: FileOpenTarget
   /** What is known about the service behind `vscode`; `none` enables the fallback. */
   codeServer: CodeServerState
+  /** A hand-typed address; while set, links in replies no longer replace the panel. */
+  manualUrl: string
   sessionId?: string
   useChat?: <T>(selector: (snapshot: ChatLike) => T, eq?: (a: T, b: T) => boolean) => T
 }
@@ -378,7 +380,7 @@ export function openVSCodeTab(ctx: ClientContext): void {
  * @param props - framework session props plus this module's own store.
  * @returns nothing to render.
  */
-function PreviewWatcher({ ctx, store, mode, fileOpen, codeServer, sessionId, useChat }: WatcherProps): ReactNode {
+function PreviewWatcher({ ctx, store, mode, fileOpen, codeServer, manualUrl, sessionId, useChat }: WatcherProps): ReactNode {
   const chat = useChat?.((snapshot: ChatLike) => snapshot)
   const paths = useRef<Map<string, string>>(new Map())
   const settled = useRef<Set<string>>(new Set())
@@ -426,14 +428,15 @@ function PreviewWatcher({ ctx, store, mode, fileOpen, codeServer, sessionId, use
       }
     }
 
-    // 3. A link in the newest reply reveals the web panel.
-    const url = newestLink(chat, mode)
+    // 3. A link in the newest reply reveals the web panel — unless an address was
+    // typed by hand, which is the user saying "keep this one".
+    const url = manualUrl.trim() === '' ? newestLink(chat, mode) : undefined
     if (url !== undefined && !loadedLinks.current.has(url)) {
       loadedLinks.current.add(url)
       store.set(sessionId, targetOf(url))
       reveal(ctx, { kind: PREVIEW_KIND })
     }
-  }, [chat, mode, fileOpen, codeServer, sessionId, store, ctx])
+  }, [chat, mode, fileOpen, codeServer, manualUrl, sessionId, store, ctx])
 
   return null
 }
@@ -443,6 +446,74 @@ interface PanelProps {
   store: PreviewStore
   t: Translate
   sessionId?: string
+  /** The address typed by hand, or an empty string to follow the agent's links. */
+  url: string
+  /** Record a hand-typed address; an empty string hands the panel back to following. */
+  setUrl: (value: string) => void
+}
+
+/** Props of the editable address field. */
+interface AddressProps {
+  /** What the field shows: the typed address, or the link the panel is following. */
+  value: string
+  /** True when the shown address was typed, i.e. the panel is pinned to it. */
+  pinned: boolean
+  /** Called with the submitted address; an empty string restores following. */
+  onSubmit: (value: string) => void
+  /** Placeholder text. */
+  placeholder: string
+  /** Accessible label. */
+  label: string
+  /** Submit button text. */
+  action: string
+  /** Text of the button that goes back to following links. */
+  follow: string
+}
+
+/**
+ * The address field: type any URL and load it in the panel.
+ *
+ * It shows the address in force either way, so a followed link is still visible and
+ * can be edited in place. The draft lives in local state and is written on submit
+ * only: every settings write re-applies the whole preview module, so writing per
+ * keystroke would tear the panel down in the middle of a word.
+ *
+ * @param props - the current address, whether it is pinned, a submit handler and the labels.
+ * @returns the address form.
+ */
+function AddressField({ value, pinned, onSubmit, placeholder, label, action, follow }: AddressProps): ReactNode {
+  const [draft, setDraft] = useState(value)
+
+  useEffect(() => {
+    setDraft(value)
+  }, [value])
+
+  return (
+    <form
+      className="booster-preview__address"
+      onSubmit={(event) => {
+        event.preventDefault()
+        onSubmit(draft.trim())
+      }}
+    >
+      <input
+        className="booster-preview__input"
+        type="text"
+        value={draft}
+        placeholder={placeholder}
+        aria-label={label}
+        onChange={(event) => setDraft(event.target.value)}
+      />
+      <button type="submit" className="booster-preview__action">
+        {action}
+      </button>
+      {pinned && (
+        <button type="button" className="booster-preview__action" onClick={() => onSubmit('')}>
+          {follow}
+        </button>
+      )}
+    </form>
+  )
 }
 
 /** Props of the framed surface both tabs share. */
@@ -450,6 +521,8 @@ interface FrameProps {
   target: PreviewTarget
   note: string
   t: Translate
+  /** Replaces the read-only address line when the surface is user-addressable. */
+  address?: ReactNode
 }
 
 /**
@@ -463,7 +536,7 @@ interface FrameProps {
  * @param props - the target, the closing note and the translator.
  * @returns the framed surface.
  */
-function FramePane({ target, note, t }: FrameProps): ReactNode {
+function FramePane({ target, note, t, address }: FrameProps): ReactNode {
   const frame = useRef<HTMLDivElement | null>(null)
 
   /** Fill the screen with the frame. */
@@ -484,9 +557,13 @@ function FramePane({ target, note, t }: FrameProps): ReactNode {
   return (
     <div className="booster-preview">
       <header className="booster-preview__head">
-        <span className="booster-preview__url" title={target.source}>
-          {target.source}
-        </span>
+        {address === undefined ? (
+          <span className="booster-preview__url" title={target.source}>
+            {target.source}
+          </span>
+        ) : (
+          address
+        )}
         <button
           type="button"
           className="booster-preview__action"
@@ -543,19 +620,42 @@ function FramePane({ target, note, t }: FrameProps): ReactNode {
  * @returns the panel surface.
  */
 function WebPanel(props: PanelProps): ReactNode {
-  const { store, t } = props
+  const { store, t, url, setUrl } = props
   const [, bump] = useState(0)
 
   useEffect(() => store.subscribe(() => bump((value) => value + 1)), [store])
 
   const sessionId = props.sessionId ?? store.activeSession()
-  const target = sessionId === undefined ? undefined : store.get(sessionId)
+  // One rule decides what the panel shows: a typed address wins over the followed
+  // link, and an empty one hands the panel back to following.
+  const typed = url.trim()
+  const followed = sessionId === undefined ? undefined : store.get(sessionId)
+  const target = typed !== '' ? targetOf(typed) : followed
+
+  const address = (
+    <AddressField
+      value={typed !== '' ? typed : (followed?.source ?? '')}
+      pinned={typed !== ''}
+      onSubmit={setUrl}
+      placeholder={t('preview.addressPlaceholder')}
+      label={t('preview.address')}
+      action={t('preview.addressGo')}
+      follow={t('preview.addressFollow')}
+    />
+  )
 
   if (target === undefined) {
-    return <p className="booster-preview__empty">{t('preview.empty')}</p>
+    // The field has to be reachable when nothing is loaded yet — otherwise there is
+    // no way to ask for a page in the first place.
+    return (
+      <div className="booster-preview">
+        <header className="booster-preview__head">{address}</header>
+        <p className="booster-preview__empty">{t('preview.empty')}</p>
+      </div>
+    )
   }
 
-  return <FramePane target={target} note={t('preview.note')} t={t} />
+  return <FramePane target={target} note={t('preview.note')} t={t} address={address} />
 }
 
 /** Props of the code-server status block, shared by the settings page and the tab. */
@@ -748,7 +848,15 @@ export const previewModule: BoosterModule = {
         slots.inject('sidebar.right.pane.tab', () =>
           slots.register(
             { name: 'sidebar.right.pane.tab', key: PREVIEW_TYPE_ID },
-            ((slotProps: Record<string, unknown>) => <WebPanel {...slotProps} store={store} t={t} />) as never,
+            ((slotProps: Record<string, unknown>) => (
+              <WebPanel
+                {...(slotProps as unknown as PanelProps)}
+                store={store}
+                t={t}
+                url={settings.preview.url}
+                setUrl={(value) => settingsStore.set('preview', { ...settingsStore.get().preview, url: value })}
+              />
+            )) as never,
           ),
         ),
       )
@@ -774,6 +882,7 @@ export const previewModule: BoosterModule = {
                 mode={mode}
                 fileOpen={fileOpen}
                 codeServer={codeServer}
+                manualUrl={settings.preview.url}
               />
             )) as never,
           ),
