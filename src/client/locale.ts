@@ -63,6 +63,16 @@ export const zh: Record<string, string> = {
   'preview.openVSCode': '在右栏打开 VS Code',
   'preview.openVSCodeHint': '不用等回复里出现链接',
   'preview.openVSCodeAction': '打开',
+  'preview.codeServer.label': '右侧 VS Code（code-server）',
+  'preview.codeServer.state.unknown': '正在检测…',
+  'preview.codeServer.state.have': '已检测到，可以用了',
+  'preview.codeServer.state.none': '未检测到。不装也没关系：写文件会自动改用产品自带的预览器',
+  'preview.codeServer.hint': '想要右侧那个真 VS Code（约 675 MB，独立程序，仅 Windows），跑这两行：',
+  'preview.codeServer.showCommand': '查看安装命令',
+  'preview.codeServer.hideCommand': '收起命令',
+  'preview.codeServer.recheck': '我装好了，重新检测',
+  'preview.codeServer.useBuiltin': '用产品自带预览器',
+  'preview.codeServer.useVscode': '改回在右侧 VS Code 打开',
   'unit.px': 'px',
 }
 
@@ -117,6 +127,16 @@ export const en: Record<string, string> = {
   'preview.openVSCode': 'Open VS Code in the right Sidebar',
   'preview.openVSCodeHint': 'No need to wait for a link to show up in a reply',
   'preview.openVSCodeAction': 'Open',
+  'preview.codeServer.label': 'VS Code in the right Sidebar (code-server)',
+  'preview.codeServer.state.unknown': 'Checking…',
+  'preview.codeServer.state.have': 'Found it — ready to use',
+  'preview.codeServer.state.none': 'Not found. That is fine: writing a file falls back to the built-in previewer',
+  'preview.codeServer.hint': 'For the real VS Code in the right Sidebar (~675 MB, separate program, Windows only), run these two lines:',
+  'preview.codeServer.showCommand': 'Show the install command',
+  'preview.codeServer.hideCommand': 'Hide the command',
+  'preview.codeServer.recheck': 'I installed it — check again',
+  'preview.codeServer.useBuiltin': 'Use the built-in previewer',
+  'preview.codeServer.useVscode': 'Open in the Sidebar VS Code again',
   'unit.px': 'px',
 }
 

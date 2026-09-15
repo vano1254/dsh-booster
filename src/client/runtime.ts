@@ -21,6 +21,14 @@ export interface ModuleContext {
   settings: BoosterSettings
   /** Translator bound to this plugin's locale namespace. */
   t: Translate
+  /**
+   * The configuration store.
+   *
+   * A module that decides something about the machine — the preview module asking
+   * whether code-server is installed — records the answer here, so it is asked once
+   * rather than every session.
+   */
+  store: BoosterStore
 }
 
 /** One opt-in feature of the booster. */
@@ -163,7 +171,7 @@ export function createModuleManager(
       if (existing !== undefined) disposeOne(module.id)
 
       try {
-        const dispose = module.apply({ ctx, settings, t })
+        const dispose = module.apply({ ctx, settings, t, store })
         applied.set(module.id, {
           signature,
           dispose: typeof dispose === 'function' ? dispose : () => {},

@@ -4,6 +4,14 @@
   "description": "DSH Web GUI 增强套件：模块化的外观与交互优化，开关可持久化、改完即时生效。",
   "license": "MIT",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vano1254/dsh-booster.git"
+  },
+  "homepage": "https://github.com/vano1254/dsh-booster",
+  "bugs": {
+    "url": "https://github.com/vano1254/dsh-booster/issues"
+  },
   "main": "lib/index.js",
   "exports": {
     ".": "./lib/index.js",

@@ -21,8 +21,8 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { injectStylesheet, PREVIEW_CSS } from '../styles.ts'
 import { resolveService, type ClientContext, type SlotsService } from '../types.ts'
 import type { Translate } from '../locale.ts'
-import type { BoosterModule } from '../runtime.ts'
-import type { FileOpenTarget, LinkMode } from '../../settings.ts'
+import type { BoosterModule, BoosterStore } from '../runtime.ts'
+import type { CodeServerState, FileOpenTarget, LinkMode, PreviewSettings } from '../../settings.ts'
 
 /** Identity of the web panel's tab type in the right Sidebar's tab system. */
 export const PREVIEW_TYPE_ID = 'dsh-booster/preview-web'
@@ -128,6 +128,72 @@ const SERVICE_HOME = `http://127.0.0.1:${SERVICE_PORT}/`
  */
 const VSCODE_TYPE_ID = 'dsh-booster/vscode'
 const VSCODE_KIND = 'booster-vscode'
+
+/**
+ * The command that installs everything the VS Code tab needs.
+ *
+ * Shown rather than run: installing code-server means downloading ~206 MB and
+ * unpacking it next to your user profile, and a browser page cannot do that. So the
+ * plugin explains and hands over the one command, which is the honest version of
+ * "offer to install it".
+ */
+const CODE_SERVER_COMMAND = [
+  'cd "$env:USERPROFILE\\.dsh\\profiles\\web\\node_modules\\dsh-booster"',
+  'powershell -ExecutionPolicy Bypass -File tools\\setup-code-server.ps1',
+].join('\n')
+
+/**
+ * Ask whether anything is listening on the Sidebar service's port.
+ *
+ * `no-cors` is the whole trick: the response is opaque and never read, but the
+ * promise still rejects when nothing answers — exactly the distinction that matters
+ * ("installed and running" vs "not there"). It is a plain GET to our own loopback
+ * port; nothing leaves the machine.
+ *
+ * @param timeoutMs - how long to wait before calling it absent.
+ * @returns true when a service answered.
+ */
+export async function probeService(timeoutMs = 1500): Promise<boolean> {
+  let timer
+  try {
+    const controller = typeof AbortController === 'function' ? new AbortController() : undefined
+    timer = setTimeout(() => controller?.abort(), timeoutMs)
+    await fetch(SERVICE_HOME, { mode: 'no-cors', cache: 'no-store', signal: controller?.signal })
+    return true
+  } catch {
+    return false
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/**
+ * Turn one probe into a remembered answer.
+ *
+ * The probe only tells us whether the service is **reachable right now** — it is
+ * started on demand and has no autostart, so "not answering" does not mean "not
+ * installed". That is why this never rewrites `fileOpen`: the user's chosen target
+ * is theirs, and the fallback for an absent service is the watcher's job.
+ *
+ * @param input - the current preview settings, a writer, and an optional probe.
+ * @returns the answer that was recorded.
+ */
+export async function resolveCodeServer(input: {
+  settings: PreviewSettings
+  set: (value: PreviewSettings) => void
+  probe?: () => Promise<boolean>
+}): Promise<CodeServerState> {
+  const probe = input.probe ?? probeService
+  let up = false
+  try {
+    up = await probe()
+  } catch {
+    up = false
+  }
+  const state: CodeServerState = up ? 'have' : 'none'
+  input.set({ ...input.settings, codeServer: state })
+  return state
+}
 
 /**
  * @param url - a candidate link.
@@ -267,6 +333,8 @@ interface WatcherProps {
   store: PreviewStore
   mode: LinkMode
   fileOpen: FileOpenTarget
+  /** What is known about the service behind `vscode`; `none` enables the fallback. */
+  codeServer: CodeServerState
   sessionId?: string
   useChat?: <T>(selector: (snapshot: ChatLike) => T, eq?: (a: T, b: T) => boolean) => T
 }
@@ -310,7 +378,7 @@ export function openVSCodeTab(ctx: ClientContext): void {
  * @param props - framework session props plus this module's own store.
  * @returns nothing to render.
  */
-function PreviewWatcher({ ctx, store, mode, fileOpen, sessionId, useChat }: WatcherProps): ReactNode {
+function PreviewWatcher({ ctx, store, mode, fileOpen, codeServer, sessionId, useChat }: WatcherProps): ReactNode {
   const chat = useChat?.((snapshot: ChatLike) => snapshot)
   const paths = useRef<Map<string, string>>(new Map())
   const settled = useRef<Set<string>>(new Set())
@@ -321,9 +389,11 @@ function PreviewWatcher({ ctx, store, mode, fileOpen, sessionId, useChat }: Watc
     if (chat === undefined || sessionId === undefined) return
 
     // 1. A file-changing call reveals the product's own preview for that file.
-    // When the VS Code bridge owns file opening, the host half has already handed
-    // the file to code-server, so this module stays out of the way.
-    const running = fileOpen === 'preview' ? (chat.legacy?.runningCalls ?? []) : []
+    // With the bridge in charge and a live service, the host half opens it in the
+    // workbench instead. Without a confirmed service the built-in previewer is the
+    // fallback, so a fresh install is never silent about a file it just wrote.
+    const useBuiltin = fileOpen === 'preview' || (fileOpen === 'vscode' && codeServer === 'none')
+    const running = useBuiltin ? (chat.legacy?.runningCalls ?? []) : []
     const runningIds = new Set(running.map((call) => call.callId))
 
     for (const call of running) {
@@ -363,7 +433,7 @@ function PreviewWatcher({ ctx, store, mode, fileOpen, sessionId, useChat }: Watc
       store.set(sessionId, targetOf(url))
       reveal(ctx, { kind: PREVIEW_KIND })
     }
-  }, [chat, mode, fileOpen, sessionId, store, ctx])
+  }, [chat, mode, fileOpen, codeServer, sessionId, store, ctx])
 
   return null
 }
@@ -488,24 +558,113 @@ function WebPanel(props: PanelProps): ReactNode {
   return <FramePane target={target} note={t('preview.note')} t={t} />
 }
 
+/** Props of the code-server status block, shared by the settings page and the tab. */
+export interface CodeServerRowProps {
+  /** Current preview settings. */
+  preview: PreviewSettings
+  /** Write the preview section: the row records an answer, or changes the target. */
+  set: (value: PreviewSettings) => void
+  /** Translator bound to this plugin's locale namespace. */
+  t: Translate
+  /** Ask again, for someone who has just installed it. */
+  recheck: () => void
+}
+
 /**
- * The pinned VS Code tab: the workbench this plugin starts on demand.
+ * What the plugin knows about code-server, and the two answers a user can act on.
  *
- * No store, no session, no link: the address is this plugin's own constant, which is
- * the whole point of giving the workbench a tab of its own.
+ * This is the "ask at install time" the README promises: a fresh install lands on
+ * `unknown`, one probe turns that into a real answer, and a "no" gets an explanation
+ * plus the single command that would change it — never a blank pane.
  *
- * @param props - the translator from the registration closure.
- * @returns the framed workbench.
+ * @param props - the state, a writer, the translator and a re-check action.
+ * @returns the status block.
  */
-function VSCodePanel(props: { t: Translate }): ReactNode {
+export function CodeServerRow(props: CodeServerRowProps): ReactNode {
+  const { preview, set, t, recheck } = props
+  const [showCommand, setShowCommand] = useState(false)
+  const state = preview.codeServer
+
+  return (
+    <div className="booster-codeserver" data-booster-code-server={state}>
+      <div className="booster-row__label">{t('preview.codeServer.label')}</div>
+      <div className="booster-row__hint">{t(`preview.codeServer.state.${state}`)}</div>
+
+      {state === 'none' && (
+        <>
+          <div className="booster-row__hint">{t('preview.codeServer.hint')}</div>
+          <div className="booster-codeserver__actions">
+            <button type="button" className="booster-button" onClick={() => setShowCommand((open) => !open)}>
+              {t(showCommand ? 'preview.codeServer.hideCommand' : 'preview.codeServer.showCommand')}
+            </button>
+            <button type="button" className="booster-button" onClick={recheck}>
+              {t('preview.codeServer.recheck')}
+            </button>
+            {preview.fileOpen !== 'preview' && (
+              <button type="button" className="booster-button" onClick={() => set({ ...preview, fileOpen: 'preview' })}>
+                {t('preview.codeServer.useBuiltin')}
+              </button>
+            )}
+          </div>
+          {showCommand && <pre className="booster-codeserver__command">{CODE_SERVER_COMMAND}</pre>}
+        </>
+      )}
+
+      {state === 'have' && preview.fileOpen !== 'vscode' && (
+        <div className="booster-codeserver__actions">
+          <button type="button" className="booster-button" onClick={() => set({ ...preview, fileOpen: 'vscode' })}>
+            {t('preview.codeServer.useVscode')}
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * The pinned VS Code tab: the workbench this plugin starts on demand, or the reason
+ * there is none yet.
+ *
+ * It reads settings live instead of through a snapshot captured at registration, so a
+ * change made in the settings page shows up here without a reload.
+ *
+ * @param props - the translator and the booster settings store.
+ * @returns the framed workbench, or the code-server status block.
+ */
+function VSCodePanel(props: { t: Translate; store: BoosterStore }): ReactNode {
+  const { t, store } = props
+  const [preview, setPreview] = useState<PreviewSettings>(() => store.get().preview)
+
+  useEffect(() => store.subscribe(() => setPreview(store.get().preview)), [store])
+
+  const recheck = (): void => {
+    void resolveCodeServer({ settings: store.get().preview, set: (value) => store.set('preview', value) })
+  }
+
+  if (preview.codeServer !== 'have') {
+    return (
+      <div className="booster-preview__empty">
+        <CodeServerRow preview={preview} set={(value) => store.set('preview', value)} t={t} recheck={recheck} />
+      </div>
+    )
+  }
+
   return (
     <FramePane
       target={{ url: SERVICE_HOME, source: SERVICE_HOME, render: 'iframe' }}
-      note={props.t('preview.vscodeNote')}
-      t={props.t}
+      note={t('preview.vscodeNote')}
+      t={t}
     />
   )
 }
+
+/**
+ * Whether this page load has already asked about code-server.
+ *
+ * Module scope on purpose: the probe must run once per page load, not once per
+ * settings change, and a module re-apply must not ask again.
+ */
+let probedOnce = false
 
 /** The preview module. */
 export const previewModule: BoosterModule = {
@@ -515,7 +674,7 @@ export const previewModule: BoosterModule = {
   defaultEnabled: true,
   configOf: (settings) => settings.preview,
 
-  apply({ ctx, settings, t }) {
+  apply({ ctx, settings, t, store: settingsStore }) {
     const store = createPreviewStore()
     const disposers: Array<() => void> = []
     let started = false
@@ -549,7 +708,12 @@ export const previewModule: BoosterModule = {
      * @param tabs - the acquired tab-type registry.
      * @param mode - which links open in the panel.
      */
-    const start = (tabs: { register(definition: unknown): () => void }, mode: LinkMode, fileOpen: FileOpenTarget): void => {
+    const start = (
+      tabs: { register(definition: unknown): () => void },
+      mode: LinkMode,
+      fileOpen: FileOpenTarget,
+      codeServer: CodeServerState,
+    ): void => {
       if (started || disposed) return
       started = true
       const slots = ctx.slots as SlotsService
@@ -594,7 +758,7 @@ export const previewModule: BoosterModule = {
         slots.inject('sidebar.right.pane.tab', () =>
           slots.register(
             { name: 'sidebar.right.pane.tab', key: VSCODE_TYPE_ID },
-            (() => <VSCodePanel t={t} />) as never,
+            (() => <VSCodePanel t={t} store={settingsStore} />) as never,
           ),
         ),
       )
@@ -604,7 +768,14 @@ export const previewModule: BoosterModule = {
           slots.register(
             { id: 'dsh-booster-preview-watch', name: WATCH_SLOT, order: 90 },
             ((slotProps: Record<string, unknown>) => (
-              <PreviewWatcher {...(slotProps as unknown as WatcherProps)} ctx={ctx} store={store} mode={mode} fileOpen={fileOpen} />
+              <PreviewWatcher
+                {...(slotProps as unknown as WatcherProps)}
+                ctx={ctx}
+                store={store}
+                mode={mode}
+                fileOpen={fileOpen}
+                codeServer={codeServer}
+              />
             )) as never,
           ),
         ),
@@ -616,11 +787,23 @@ export const previewModule: BoosterModule = {
     // providers — this package declares none, so a plain read can simply be too
     // early. Try it first, then wait for the service the way the shipped
     // right-Sidebar consumers do.
+    // Ask once per page load, and only while the answer is unknown — this is the
+    // "ask at install time" the settings page then reports on. The write re-enters
+    // `sync()`, which is fine: the second pass sees a real answer and stops.
+    if (settings.preview.codeServer === 'unknown' && !probedOnce) {
+      probedOnce = true
+      void resolveCodeServer({
+        settings: settingsStore.get().preview,
+        set: (value) => settingsStore.set('preview', value),
+      })
+    }
+
     const mode = settings.preview.linkMode
     const fileOpen = settings.preview.fileOpen
+    const codeServer = settings.preview.codeServer
     const immediate = readTabsFace(ctx)
     if (immediate !== undefined) {
-      start(immediate, mode, fileOpen)
+      start(immediate, mode, fileOpen, codeServer)
     } else {
       const inject = (ctx as unknown as { inject?: (names: string[], callback: (scoped: ClientContext) => void) => unknown }).inject
       if (typeof inject === 'function') {
@@ -631,7 +814,7 @@ export const previewModule: BoosterModule = {
               report('inject-no-service')
               return
             }
-            start(tabs, mode, fileOpen)
+            start(tabs, mode, fileOpen, codeServer)
           })
           if (typeof disposeInjection === 'function') disposers.push(disposeInjection as () => void)
         } catch (error) {

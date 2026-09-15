@@ -11,6 +11,7 @@
 import Schema from '@deepseek-ai/schemastery'
 import {
   ACCENT_CHOICES,
+  CODE_SERVER_STATES,
   DEFAULT_APPEARANCE,
   DEFAULT_HEADER_TOOLS,
   DEFAULT_MODULES,
@@ -43,5 +44,6 @@ export const BoosterSchema = Schema.object({
   preview: Schema.object({
     linkMode: Schema.union(LINK_MODES.map((mode) => Schema.const(mode))).default(DEFAULT_PREVIEW.linkMode),
     fileOpen: Schema.union(FILE_OPEN_TARGETS.map((target) => Schema.const(target))).default(DEFAULT_PREVIEW.fileOpen),
+    codeServer: Schema.union(CODE_SERVER_STATES.map((state) => Schema.const(state))).default(DEFAULT_PREVIEW.codeServer),
   }).default({ ...DEFAULT_PREVIEW }),
 })

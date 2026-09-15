@@ -18,7 +18,7 @@ import type { ClientContext } from './types.ts'
 
 // Re-exported so the smoke test can exercise the workbench entry point through the
 // bundle that actually ships, the way the host half re-exports `ensureService`.
-export { openVSCodeTab } from './modules/preview.tsx'
+export { openVSCodeTab, resolveCodeServer } from './modules/preview.tsx'
 
 /** Cordis plugin name; the loader entry and the client bundle id. */
 export const name = 'dsh-booster'

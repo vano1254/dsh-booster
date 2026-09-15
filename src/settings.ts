@@ -23,6 +23,15 @@ export type LinkMode = 'all' | 'video'
 /** Where a settled file edit is shown. */
 export type FileOpenTarget = 'vscode' | 'preview' | 'off'
 
+/**
+ * What is known about the Sidebar's code-server, decided once and then remembered.
+ *
+ * `unknown` means nobody has looked yet — the state a fresh install starts in, and
+ * the moment the plugin asks. `have` and `none` are the two answers; `none` is what
+ * makes the built-in previewer the fallback instead of a silent no-op.
+ */
+export type CodeServerState = 'unknown' | 'have' | 'none'
+
 /** Appearance module preferences. */
 export interface AppearanceSettings {
   /** Accent palette; `default` applies no override layer at all. */
@@ -43,8 +52,16 @@ export interface HeaderToolsSettings {
 export interface PreviewSettings {
   /** `all` follows every http(s) link in a reply; `video` only video links. */
   linkMode: LinkMode
-  /** scode hands the file to the Sidebar's code-server bridge. */
+  /** `vscode` hands the file to the Sidebar's code-server bridge. */
   fileOpen: FileOpenTarget
+  /**
+   * Whether the Sidebar's code-server has been looked for, and what was found.
+   *
+   * `unknown` is the fresh-install state: the plugin probes once, and on "not
+   * there" it drops `fileOpen` back to the built-in previewer rather than leaving
+   * file writes with nowhere to appear.
+   */
+  codeServer: CodeServerState
 }
 
 /** The whole `booster` settings section. */
@@ -82,6 +99,7 @@ export const DEFAULT_HEADER_TOOLS: HeaderToolsSettings = {
 export const DEFAULT_PREVIEW: PreviewSettings = {
   linkMode: 'all',
   fileOpen: 'vscode',
+  codeServer: 'unknown',
 }
 
 /** Every selectable accent, in menu order; labels live in the client locale. */
@@ -95,6 +113,9 @@ export const LINK_MODES: readonly LinkMode[] = ['all', 'video']
 
 /** Every selectable file-open target, in menu order. */
 export const FILE_OPEN_TARGETS: readonly FileOpenTarget[] = ['vscode', 'preview', 'off']
+
+/** Every remembered code-server answer, in the order the plugin reaches them. */
+export const CODE_SERVER_STATES: readonly CodeServerState[] = ['unknown', 'have', 'none']
 
 /**
  * Coerce a raw settings section into a complete, safe configuration.

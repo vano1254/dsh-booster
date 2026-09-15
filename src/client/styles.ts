@@ -76,6 +76,20 @@ export const SETTINGS_PAGE_CSS = `
   cursor: pointer;
 }
 .booster-button:hover { border-color: var(--dsw-alias-brand-primary); color: var(--dsw-alias-brand-primary); }
+.booster-codeserver { padding: 10px 0 2px; }
+.booster-codeserver__actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.booster-codeserver__command {
+  margin: 8px 0 0;
+  padding: 8px 9px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 7px;
+  background: var(--dsw-alias-bg-layer-2);
+  color: var(--dsw-alias-label-primary);
+  font-size: 11px;
+  line-height: 1.6;
+  overflow-x: auto;
+  white-space: pre;
+}
 .booster-stepper { display: inline-flex; align-items: center; border: 1px solid var(--dsw-alias-border-l1); border-radius: 7px; overflow: hidden; }
 .booster-stepper button {
   border: 0;

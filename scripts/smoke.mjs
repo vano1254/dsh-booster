@@ -430,7 +430,7 @@ const ctx = {
 
 // These tests exercise the built-in preview path, which the ileOpen switch
 // only selects when it is not scode.
-scopeValue = { preview: { linkMode: 'all', fileOpen: 'preview' } }
+scopeValue = { preview: { linkMode: 'all', fileOpen: 'preview', codeServer: 'have' } }
 client.apply(ctx)
 
 const liveNames = () => slotRegistrations.filter((r) => !r.disposed).map((r) => r.options.name)
@@ -492,6 +492,51 @@ check('settings page offers every link mode', ['all', 'video'].every((mode) => o
 for (const handler of switches.slice(0, 1)) handler({ target: { checked: false } })
 check('a switch writes a modules section through the store', scopeWrites.some((w) => w.field === 'modules' && typeof w.value === 'object' && w.value !== null))
 
+// Asking about code-server: the single probe a fresh install gets, and the fallback
+// that keeps file writes from pointing at a service that is not there.
+console.log('\ncode-server choice')
+
+const scopeTo = (preview) => {
+  scopeValue = { modules: { preview: true, appearance: true, headerTools: true }, preview: { linkMode: 'all', ...preview } }
+  for (const listener of [...scopeListeners]) listener()
+}
+
+scopeTo({ fileOpen: 'preview', codeServer: 'have' })
+const controlsWithService = collectProp(mount(page.component), 'onClick').length
+scopeTo({ fileOpen: 'preview', codeServer: 'none' })
+const controlsWithoutService = collectProp(mount(page.component), 'onClick').length
+
+check(
+  'the settings page states what it knows about code-server',
+  collectValue(mount(page.component), 'data-booster-code-server').includes('none'),
+)
+check('a machine without code-server gets more controls, not fewer', controlsWithoutService > controlsWithService)
+
+const asked = []
+const answer = await client.resolveCodeServer({
+  settings: { linkMode: 'all', fileOpen: 'vscode', codeServer: 'unknown' },
+  set: (value) => asked.push(value),
+  probe: async () => false,
+})
+check('a fresh install without the service is answered, not guessed', answer === 'none' && asked[0]?.codeServer === 'none')
+check('the probe never rewrites the target the user chose', asked[0]?.fileOpen === 'vscode')
+
+const kept = []
+const found = await client.resolveCodeServer({
+  settings: { linkMode: 'all', fileOpen: 'vscode', codeServer: 'unknown' },
+  set: (value) => kept.push(value),
+  probe: async () => true,
+})
+check('a machine that has the service keeps opening files in it', found === 'have' && kept[0]?.fileOpen === 'vscode')
+
+const explicit = []
+await client.resolveCodeServer({
+  settings: { linkMode: 'all', fileOpen: 'off', codeServer: 'unknown' },
+  set: (value) => explicit.push(value),
+  probe: async () => false,
+})
+check('an explicit target survives an absent service too', explicit[0]?.fileOpen === 'off')
+
 // ----------------------------------------------------------- preview module
 
 console.log('\npreview module')
@@ -543,7 +588,7 @@ function collectTypes(node) {
 
 // The settings-page block above flipped the first module switch off; restore the
 // full configuration so this block exercises a live module.
-scopeValue = { modules: { preview: true, appearance: true, headerTools: true }, preview: { linkMode: 'all', fileOpen: 'preview' } }
+scopeValue = { modules: { preview: true, appearance: true, headerTools: true }, preview: { linkMode: 'all', fileOpen: 'preview', codeServer: 'have' } }
 for (const listener of [...scopeListeners]) listener()
 
 const liveRegistration = (predicate) => slotRegistrations.filter(predicate).at(-1)
@@ -690,6 +735,21 @@ check('accent layer carries light+dark brand tokens', (() => {
   return typeof brand?.light === 'string' && typeof brand?.dark === 'string'
 })())
 check('re-enabling the module registers the tab type again', tabsRegistered.length >= 2)
+
+// The bridge is chosen but no service answered: a written file still has to appear
+// somewhere. Re-apply with exactly that configuration and watch where it opens.
+scopeValue = {
+  modules: { preview: true, appearance: true, headerTools: true },
+  preview: { linkMode: 'all', fileOpen: 'vscode', codeServer: 'none' },
+}
+for (const listener of [...scopeListeners]) listener()
+
+const fallbackWatcher = liveRegistration((r) => r.options.id === 'dsh-booster-preview-watch')
+const fallbackBefore = openedResources.length
+chatValue = { legacy: { runningCalls: [{ callId: 'fb1', name: 'write', argsRaw: '{"file_path":"src/fb.ts"}' }], nodes: [] } }
+mount(fallbackWatcher.component, { useChat: useChatStub, sessionId: 'sess-fb' })
+check('a write still opens somewhere when the service is absent', openedResources.length === fallbackBefore + 1)
+check('and it is the built-in previewer that opened it', String(openedResources.at(-1)).includes('sess-fb'))
 // ------------------------------------------- service-acquisition regression
 console.log('\nservice acquisition')
 

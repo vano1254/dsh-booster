@@ -20,7 +20,7 @@ import {
   type FontFamilyChoice,
   type LinkMode,
 } from '../settings.ts'
-import { openVSCodeTab } from './modules/preview.tsx'
+import { CodeServerRow, openVSCodeTab, resolveCodeServer } from './modules/preview.tsx'
 import { FONT_SIZE_MAX, FONT_SIZE_MIN, readFontSize, subscribeTheme, writeFontSize } from './theme.ts'
 import type { Translate } from './locale.ts'
 import type { BoosterModule, BoosterStore } from './runtime.ts'
@@ -162,6 +162,15 @@ const BODIES: Record<string, (props: BodyProps) => ReactNode> = {
 
   preview: ({ settings, store, t, openVSCode }) => (
     <>
+      <CodeServerRow
+        preview={settings.preview}
+        set={(value) => store.set('preview', value)}
+        t={t}
+        recheck={() => {
+          void resolveCodeServer({ settings: store.get().preview, set: (value) => store.set('preview', value) })
+        }}
+      />
+
       <div className="booster-row">
         <div>
           <div className="booster-row__label">{t('preview.openVSCode')}</div>

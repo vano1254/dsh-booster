@@ -29,6 +29,14 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the address it frames carries no `?folder=` — code-server persists that parameter
   past the page, which is how a documentation example once pinned the workbench to a
   path that does not exist.
+- **An install-time choice about code-server.** A fresh install starts at
+  `preview.codeServer: unknown`; one probe decides it, and the settings page plus the
+  VS Code tab then report what was found. The probe never rewrites `fileOpen` — it only
+  reports whether the service is *reachable now*, and the service has no autostart — so
+  an absent service instead makes the client fall back to the built-in previewer for
+  that write, with the install command one click away.
+- `tools/setup-code-server.ps1`: download, verify, extract, install the bridge
+  extension and start the service in one command, with an optional pinned SHA-256.
 
 ### Fixed
 
