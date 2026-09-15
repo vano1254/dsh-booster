@@ -10,7 +10,7 @@ DSH Web GUI 的增强套件：**模块化、可开关、改完即时生效**。
 
 ```sh
 # 方式一：GitHub tarball（推荐，无需 npm 账号）
-dsh plugin --profile web add https://github.com/vano1254/dsh-booster/archive/refs/tags/v0.2.0.tar.gz
+dsh plugin --profile web add https://github.com/vano1254/dsh-booster/archive/refs/tags/v0.2.0-beta.1.tar.gz
 
 # 方式二：本地开发（源码改动即时可见，仍需重启 GUI）
 dsh plugin --profile web add link:/absolute/path/to/dsh-booster

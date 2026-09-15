@@ -1,6 +1,6 @@
 {
   "name": "dsh-booster",
-  "version": "0.2.0",
+  "version": "0.2.0-beta.1",
   "description": "DSH Web GUI 增强套件：模块化的外观与交互优化，开关可持久化、改完即时生效。",
   "license": "MIT",
   "type": "module",

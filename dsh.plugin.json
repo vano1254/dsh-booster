@@ -1,6 +1,6 @@
 {
   "id": "dsh-booster",
-  "version": "0.2.0",
+  "version": "0.2.0-beta.1",
   "main": "lib/index.js",
   "description": "DSH Web GUI 增强套件：模块化的外观与交互优化（设置页统一开关，配置写入 settings.yaml）。",
   "engines": {
