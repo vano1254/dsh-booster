@@ -110,6 +110,13 @@ export async function ensureService(env: NodeJS.ProcessEnv = process.env, port =
     const launcher = await findLauncher(env)
     if (launcher === undefined) return
 
+    // The launcher is a Windows batch file and WMI is what starts it, so anywhere
+    // else there is nothing to start. Skipping here is not just tidiness: `spawn`
+    // reports a missing binary **asynchronously**, and an 'error' event nobody
+    // listens for takes the whole host process down with it. That was a real bug —
+    // on macOS and Linux a single file write was enough to kill the GUI.
+    if (process.platform !== 'win32') return
+
     // Only a real launch consumes the retry window. "Not installed here" is not a
     // broken install to throttle, and treating it as one blocked the next valid
     // start for a full minute.
@@ -135,9 +142,16 @@ export async function ensureService(env: NodeJS.ProcessEnv = process.env, port =
     // returns 0. This PowerShell is short-lived and only exists to ask WMI for the
     // process, so it does not need detaching: the thing that has to escape DSH's
     // process tree is code-server, and WMI is what puts it there.
-    spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', encoded], {
+    const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', encoded], {
       stdio: 'ignore',
-    }).unref()
+    })
+    // Even on Windows this can fail (a locked-down PATH, a policy blocking
+    // PowerShell). Without this listener that failure is an unhandled 'error'
+    // event, i.e. a dead host process.
+    child.on('error', (error) => {
+      console.error('[dsh-booster] starting the Sidebar service failed:', error)
+    })
+    child.unref()
   } catch (error) {
     console.error('[dsh-booster] starting the Sidebar service failed:', error)
   }

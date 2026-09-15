@@ -168,12 +168,20 @@ await hostEntry.ensureService({ LOCALAPPDATA: fakeRoot }, probePort)
 check('an already-running service is not started again', nodeFs.existsSync(ranFile) === false)
 await new Promise((resolve) => probe.close(resolve))
 
-// Nothing listening but a launcher present: the WMI command must actually run it.
-await hostEntry.ensureService({ LOCALAPPDATA: fakeRoot }, 59998)
-for (let attempt = 0; attempt < 40 && !nodeFs.existsSync(ranFile); attempt += 1) {
-  await new Promise((resolve) => setTimeout(resolve, 250))
+// Nothing listening but a launcher present: on Windows the WMI command must
+// actually run it. Everywhere else the start is skipped on purpose — that is the
+// behaviour that keeps a non-Windows host from spawning a binary that is not there.
+if (process.platform === 'win32') {
+  await hostEntry.ensureService({ LOCALAPPDATA: fakeRoot }, 59998)
+  for (let attempt = 0; attempt < 40 && !nodeFs.existsSync(ranFile); attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 250))
+  }
+  check('a missing service is started through the WMI command', nodeFs.existsSync(ranFile))
+} else {
+  await hostEntry.ensureService({ LOCALAPPDATA: fakeRoot }, 59998)
+  await new Promise((resolve) => setTimeout(resolve, 600))
+  check('off Windows the start is skipped instead of spawning a missing binary', nodeFs.existsSync(ranFile) === false)
 }
-check('a missing service is started through the WMI command', nodeFs.existsSync(ranFile))
 
 nodeFs.rmSync(fakeRoot, { recursive: true, force: true })
 // ------------------------------------------------------- mini React harness

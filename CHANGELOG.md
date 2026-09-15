@@ -40,6 +40,12 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **A crash on any machine without `powershell.exe`.** Starting the service spawned the
+  launcher with no `'error'` listener, and Node reports a missing binary asynchronously —
+  so the failure arrived as an unhandled event and took the whole host process with it. On
+  macOS and Linux a single file write was enough to kill the GUI. The start is now skipped
+  where it cannot work, and a failed spawn is logged instead of fatal. Found by the new CI
+  matrix: the single-OS job could never have seen it.
 - The Sidebar service's own address (`127.0.0.1:8443` / `localhost:8443`) is no longer
   followed as if it were content worth previewing. code-server persists the `?folder=`
   it is opened with, so a reply that merely *mentioned* that URL could pin the workbench

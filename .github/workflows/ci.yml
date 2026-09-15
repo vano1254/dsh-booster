@@ -7,7 +7,15 @@ on:
 
 jobs:
   verify:
-    runs-on: ubuntu-latest
+    # Both platforms on purpose. Linux proves the UI modules and the host logic carry
+    # no Windows assumption; Windows is the only place the WMI start path can be
+    # exercised at all. A crash that only happens where `powershell.exe` is missing is
+    # exactly what a single-OS matrix would have kept hidden.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
