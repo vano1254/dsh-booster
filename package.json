@@ -22,14 +22,18 @@
   "files": [
     "lib",
     "scripts",
+    "tools",
+    "vscode-extension",
     "cordis.patch.yml",
     "dsh.plugin.json",
     "README.md",
+    "SECURITY.md",
     "LICENSE"
   ],
   "scripts": {
     "build": "node build.mjs",
-    "smoke": "node scripts/smoke.mjs"
+    "smoke": "node scripts/smoke.mjs",
+    "audit": "node scripts/audit.mjs"
   },
   "engines": {
     "node": "^22.19 || >=24"
