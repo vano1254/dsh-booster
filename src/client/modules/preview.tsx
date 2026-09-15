@@ -665,7 +665,6 @@ function VSCodePanel(props: { t: Translate; store: BoosterStore }): ReactNode {
  * settings change, and a module re-apply must not ask again.
  */
 let probedOnce = false
-
 /** The preview module. */
 export const previewModule: BoosterModule = {
   id: 'preview',
@@ -787,14 +786,17 @@ export const previewModule: BoosterModule = {
     // providers — this package declares none, so a plain read can simply be too
     // early. Try it first, then wait for the service the way the shipped
     // right-Sidebar consumers do.
-    // Ask once per page load, and only while the answer is unknown — this is the
-    // "ask at install time" the settings page then reports on. The write re-enters
-    // `sync()`, which is fine: the second pass sees a real answer and stops.
-    if (settings.preview.codeServer === 'unknown' && !probedOnce) {
+    // Ask once per page load, and keep asking while the answer is not "have": the
+    // service has no autostart, so today's "no" can be tomorrow's "yes" without the
+    // user hunting for a button. The write is skipped when nothing changed, so a
+    // machine that simply does not have code-server does not churn settings.yaml.
+    if (settings.preview.codeServer !== 'have' && !probedOnce) {
       probedOnce = true
       void resolveCodeServer({
         settings: settingsStore.get().preview,
-        set: (value) => settingsStore.set('preview', value),
+        set: (value) => {
+          if (value.codeServer !== settingsStore.get().preview.codeServer) settingsStore.set('preview', value)
+        },
       })
     }
 
