@@ -14,10 +14,9 @@ dsh plugin --profile web add https://github.com/vano1254/dsh-booster/archive/ref
 
 # 方式二：本地开发（源码改动即时可见，仍需重启 GUI）
 dsh plugin --profile web add link:/absolute/path/to/dsh-booster
-
-# 方式三：npm
-dsh plugin --profile web add dsh-booster
 ```
+
+> **没有"npm 安装"这一种。** 仓库里的 `package.json` 是 npm 形状的，但这个包**从未发布到 npm**，所以 `dsh plugin --profile web add dsh-booster` 会 404。想要那条路，就自己发一次包（`npm publish`）—— 本仓库不替你做这件事。
 
 **装完必须重启 Web GUI 才生效**（客户端模块图在启动时组装）。
 
