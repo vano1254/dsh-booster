@@ -889,7 +889,10 @@ check('does not wait when the synchronous read succeeds', immediate.records.inje
 
 console.log('')
 if (failures.length > 0) {
-  console.error(`smoke: ${failures.length} check(s) failed`)
+  // Listed at the end as well as at the point of failure: the tail of a CI log is the
+  // part anyone actually reads, and "1 check(s) failed" on its own answers nothing.
+  console.log(`smoke: ${failures.length} check(s) failed:`)
+  for (const label of failures) console.log(`  - ${label}`)
   process.exit(1)
 }
 console.log('smoke: all checks passed')
