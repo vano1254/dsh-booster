@@ -106,15 +106,41 @@ host.apply({
 })
 check('the bridge subscribes to settled results', typeof settle === 'function')
 
+/**
+ * Wait until a condition holds, or give up.
+ *
+ * Fixed sleeps flake: a 60 ms wait for an asynchronous file write held on an idle
+ * desktop and failed on a cold CI runner, which is a red build that says nothing about
+ * the code. Polling the condition is both faster and steadier.
+ *
+ * @param {() => boolean} predicate - the condition to wait for; it may throw while not ready.
+ * @param {number} [timeoutMs] - how long to wait before giving up.
+ * @returns {Promise<boolean>} whether the condition held.
+ */
+async function waitFor(predicate, timeoutMs = 3000) {
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    try {
+      if (predicate()) return true
+    } catch {
+      // Not ready yet.
+    }
+    if (Date.now() > deadline) return false
+    await new Promise((resolve) => setTimeout(resolve, 25))
+  }
+}
+
 const readMarker = () => JSON.parse(nodeFs.readFileSync(marker, 'utf8'))
 const writeAndSettle = async (name, args, isError = false) => {
   settle({ name, arguments: args }, { isError })
-  await new Promise((resolve) => setTimeout(resolve, 60))
+  // Negative assertions ("no request was dropped") need a window in which the request
+  // could have appeared; positive ones poll below.
+  await new Promise((resolve) => setTimeout(resolve, 200))
 }
 
 await writeAndSettle('write', { file_path: 'C:/work/a.ts' })
-check('a settled write drops a bridge request', nodeFs.existsSync(marker))
-check('the request names the written file', readMarker().path === 'C:/work/a.ts')
+check('a settled write drops a bridge request', await waitFor(() => nodeFs.existsSync(marker)))
+check('the request names the written file', await waitFor(() => readMarker().path === 'C:/work/a.ts'))
 check('the request is stamped for ordering', typeof readMarker().at === 'number')
 check('no temp file is left behind', !nodeFs.existsSync(`${marker}.tmp`))
 
@@ -125,7 +151,7 @@ await writeAndSettle('bash', { command: 'ls' })
 check('a non-file tool drops no request', readMarker().path === 'C:/work/a.ts')
 
 await writeAndSettle('edit', { file_path: 'C:/work/c.ts' })
-check('a settled edit does drop one', readMarker().path === 'C:/work/c.ts')
+check('a settled edit does drop one', await waitFor(() => readMarker().path === 'C:/work/c.ts'))
 
 // With the built-in preview owning file opening, the bridge stays silent.
 config.preview.fileOpen = 'preview'
