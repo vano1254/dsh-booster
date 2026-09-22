@@ -11,6 +11,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import {
   ACCENT_CHOICES,
+  CHIME_MIN_SECONDS,
   FILE_OPEN_TARGETS,
   FONT_FAMILY_CHOICES,
   LINK_MODES,
@@ -157,6 +158,54 @@ const BODIES: Record<string, (props: BodyProps) => ReactNode> = {
         checked={settings.headerTools.readingSize}
         onChange={(next) => store.set('headerTools', { ...settings.headerTools, readingSize: next })}
       />
+    </>
+  ),
+
+  chime: ({ settings, store, t }) => (
+    <>
+      <div className="booster-row">
+        <div>
+          <div className="booster-row__label">{t('chime.minSeconds')}</div>
+          <div className="booster-row__hint">{t('chime.minSecondsHint')}</div>
+        </div>
+        <div className="booster-row__control">
+          <select
+            className="booster-select"
+            value={String(settings.chime.minSeconds)}
+            onChange={(event) => store.set('chime', { ...settings.chime, minSeconds: Number(event.target.value) })}
+          >
+            {CHIME_MIN_SECONDS.map((seconds) => (
+              <option key={seconds} value={String(seconds)}>
+                {t(`chime.minOption.${seconds}`)}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      <CheckRow
+        t={t}
+        label={t('chime.onError')}
+        hint={t('chime.onErrorHint')}
+        checked={settings.chime.onError}
+        onChange={(next) => store.set('chime', { ...settings.chime, onError: next })}
+      />
+
+      <div className="booster-row">
+        <div>
+          <div className="booster-row__label">{t('chime.preview')}</div>
+          <div className="booster-row__hint">{t('chime.previewHint')}</div>
+        </div>
+        <div className="booster-row__control">
+          <button
+            type="button"
+            className="booster-button"
+            onClick={() => store.set('chime', { ...settings.chime, previewAt: Date.now() })}
+          >
+            {t('chime.previewAction')}
+          </button>
+        </div>
+      </div>
     </>
   ),
 

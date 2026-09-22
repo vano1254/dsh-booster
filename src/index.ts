@@ -19,10 +19,12 @@ import { mkdir, rename, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { markerPath, type OpenRequest } from './bridge.ts'
 import { SERVICE_PORT, ensureService, isListening } from './service.ts'
+import { playChime, shouldChime } from './chime.ts'
 
 // Re-exported for the deterministic smoke test; the loader only reads the
 // plugin name and apply from this entry.
 export { ensureService, findLauncher, isListening } from './service.ts'
+export { chimeCachePath, renderChime, shouldChime } from './chime.ts'
 import { BoosterSchema } from './schema.ts'
 import { BOOSTER_NAMESPACE, normalizeBoosterSettings, type BoosterSettings } from './settings.ts'
 
@@ -34,6 +36,15 @@ const FILE_TOOLS = new Set(['write', 'edit'])
 
 /** The newest start request this process has already honoured. */
 let lastStartRequest = 0
+
+/** When the current run started, for the chime's minimum-length rule. */
+let runningSince: number | undefined
+
+/** When the last error arrived, so a failure does not chime twice. */
+let erroredAt = 0
+
+/** The newest chime preview request this process has already honoured. */
+let lastPreviewAt = 0
 
 /** The settings slice this plugin reads, and writes once to answer a start request. */
 interface SettingsFace {
@@ -59,6 +70,17 @@ async function waitForListening(port: number, budgetMs: number): Promise<boolean
     if (Date.now() >= deadline) return false
     await new Promise((resolve) => setTimeout(resolve, 400))
   }
+}
+
+/**
+ * Read the current booster configuration from the host's settings face.
+ *
+ * @param host - the narrowed host context.
+ * @returns the raw section, for the normalizer.
+ */
+function settingsOf(host: BoosterHostContext): unknown {
+  const settings = host.get('settings') as SettingsFace | undefined
+  return settings?.get(BOOSTER_NAMESPACE)
 }
 
 /**
@@ -174,6 +196,51 @@ export function apply(ctx: Context): void {
     }
   })
 
+  // The completion chime. `agent/status` is the only signal that means "this turn is
+  // over", and it arrives here rather than in the browser — so the machine plays the
+  // sound, and it is heard even when the GUI is behind something else.
+  host.on('agent/status', (payload) => {
+    try {
+      const status = (payload as { status?: unknown } | undefined)?.status
+      const config = normalizeBoosterSettings(settingsOf(host))
+      if (config.modules.chime !== true) return
+
+      if (status === 'running') {
+        runningSince = Date.now()
+        return
+      }
+      if (status !== 'idle') return
+
+      const startedAt = runningSince
+      runningSince = undefined
+      if (startedAt === undefined) return
+      const now = Date.now()
+      // The rule (minimum length, one chime per failure) lives in a pure function so
+      // the smoke test can check it without playing anything.
+      const chiming = shouldChime({
+        enabled: config.modules.chime === true,
+        elapsedMs: now - startedAt,
+        minSeconds: config.chime.minSeconds,
+        erroredAgoMs: now - erroredAt,
+      })
+      if (!chiming) return
+      void playChime('done')
+    } catch (error) {
+      console.error('[dsh-booster] handling a status change failed:', error)
+    }
+  })
+
+  host.on('agent/error', () => {
+    try {
+      const config = normalizeBoosterSettings(settingsOf(host))
+      if (config.modules.chime !== true || config.chime.onError !== true) return
+      erroredAt = Date.now()
+      void playChime('error')
+    } catch (error) {
+      console.error('[dsh-booster] handling an agent error failed:', error)
+    }
+  })
+
   // A browser page cannot start a program, so the VS Code tab bumps
   // `preview.startRequest` and this picks it up. `settings/updated` already carries
   // the resolved value, so there is nothing to read back.
@@ -181,13 +248,20 @@ export function apply(ctx: Context): void {
     try {
       if (ns !== BOOSTER_NAMESPACE) return
       const config = normalizeBoosterSettings(next)
+
+      // The preview button in the chime card: play it so the choice can be heard.
+      if (config.chime.previewAt > lastPreviewAt) {
+        lastPreviewAt = config.chime.previewAt
+        void playChime('done')
+      }
+
       if (config.preview.fileOpen !== 'vscode') return
       if (config.preview.startRequest <= lastStartRequest) return
       lastStartRequest = config.preview.startRequest
       // Forced: the user asked by opening the tab, so the retry window does not apply.
       void answerStartRequest(host, config)
     } catch (error) {
-      console.error('[dsh-booster] handling a start request failed:', error)
+      console.error('[dsh-booster] handling a settings change failed:', error)
     }
   })
 }

@@ -81,6 +81,21 @@ export interface PreviewSettings {
   startRequest: number
 }
 
+/** Completion-chime preferences. */
+export interface ChimeSettings {
+  /**
+   * Only chime when a turn ran at least this many seconds.
+   *
+   * Without this, every one-line answer would beep, which is how a notification turns
+   * into something you mute.
+   */
+  minSeconds: number
+  /** Chime when a turn ends in an error, using the falling sound. */
+  onError: boolean
+  /** A preview request: the client bumps this, and the host plays the chime once. */
+  previewAt: number
+}
+
 /** The whole `booster` settings section. */
 export interface BoosterSettings {
   /** Per-module enable switches, keyed by module id. */
@@ -91,6 +106,8 @@ export interface BoosterSettings {
   headerTools: HeaderToolsSettings
   /** Preview module configuration. */
   preview: PreviewSettings
+  /** Completion-chime configuration. */
+  chime: ChimeSettings
 }
 
 /** Default enable state per module id. */
@@ -98,6 +115,7 @@ export const DEFAULT_MODULES: Record<string, boolean> = {
   preview: true,
   appearance: true,
   headerTools: true,
+  chime: false,
 }
 
 /** Default appearance configuration. */
@@ -120,6 +138,16 @@ export const DEFAULT_PREVIEW: PreviewSettings = {
   url: '',
   startRequest: 0,
 }
+
+/** Default chime configuration. */
+export const DEFAULT_CHIME: ChimeSettings = {
+  minSeconds: 3,
+  onError: true,
+  previewAt: 0,
+}
+
+/** Selectable minimum turn length, in seconds, in menu order. */
+export const CHIME_MIN_SECONDS: readonly number[] = [0, 3, 5, 10]
 
 /** Every selectable accent, in menu order; labels live in the client locale. */
 export const ACCENT_CHOICES: readonly AccentChoice[] = ['default', 'ocean', 'forest', 'violet']
@@ -152,11 +180,13 @@ export function normalizeBoosterSettings(value: unknown): BoosterSettings {
   const appearance = (raw.appearance !== null && typeof raw.appearance === 'object' ? raw.appearance : {}) as Partial<AppearanceSettings>
   const headerTools = (raw.headerTools !== null && typeof raw.headerTools === 'object' ? raw.headerTools : {}) as Partial<HeaderToolsSettings>
   const preview = (raw.preview !== null && typeof raw.preview === 'object' ? raw.preview : {}) as Partial<PreviewSettings>
+  const chime = (raw.chime !== null && typeof raw.chime === 'object' ? raw.chime : {}) as Partial<ChimeSettings>
 
   return {
     modules: { ...DEFAULT_MODULES, ...modules },
     appearance: { ...DEFAULT_APPEARANCE, ...appearance },
     headerTools: { ...DEFAULT_HEADER_TOOLS, ...headerTools },
     preview: { ...DEFAULT_PREVIEW, ...preview },
+    chime: { ...DEFAULT_CHIME, ...chime },
   }
 }

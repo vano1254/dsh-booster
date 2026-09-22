@@ -7,9 +7,10 @@
  * @module dsh-booster/client/modules
  */
 import { appearanceModule } from './appearance.ts'
+import { chimeModule } from './chime.ts'
 import { headerToolsModule } from './header-tools.tsx'
 import { previewModule } from './preview.tsx'
 import type { BoosterModule } from '../runtime.ts'
 
 /** Every module this build ships. */
-export const MODULES: readonly BoosterModule[] = [previewModule, appearanceModule, headerToolsModule]
+export const MODULES: readonly BoosterModule[] = [previewModule, appearanceModule, headerToolsModule, chimeModule]

@@ -97,6 +97,8 @@ const marker = nodePath.join(bridgeRoot, 'code-server', 'bridge', 'open-request.
 const config = { preview: { linkMode: 'all', fileOpen: 'vscode' } }
 let settle
 let settingsUpdated
+let statusListener
+let errorListener
 const answerWrites = []
 host.apply({
   inject: (_names, callback) => callback({ settings: { register: () => {} } }),
@@ -114,6 +116,8 @@ host.apply({
   on: (event, listener) => {
     if (event === 'tools/result') settle = listener
     if (event === 'settings/updated') settingsUpdated = listener
+    if (event === 'agent/status') statusListener = listener
+    if (event === 'agent/error') errorListener = listener
     return () => {}
   },
 })
@@ -173,6 +177,28 @@ check('the preview target leaves the bridge silent', readMarker().path === 'C:/w
 
 process.env.LOCALAPPDATA = savedLocalAppData
 nodeFs.rmSync(bridgeRoot, { recursive: true, force: true })
+
+// ------------------------------------------------------------ completion chime
+
+console.log('\ncompletion chime')
+
+const doneWav = host.renderChime('done')
+const errorWav = host.renderChime('error')
+check(
+  'the completion chime renders a RIFF/WAVE file',
+  doneWav.subarray(0, 4).toString() === 'RIFF' && doneWav.subarray(8, 12).toString() === 'WAVE',
+)
+check('its declared length matches its bytes', doneWav.readUInt32LE(4) === doneWav.length - 8 && doneWav.readUInt32LE(40) === doneWav.length - 44)
+check('it is mono 16-bit at 44.1 kHz', doneWav.readUInt16LE(22) === 1 && doneWav.readUInt16LE(34) === 16 && doneWav.readUInt32LE(24) === 44100)
+check('rendering is deterministic', host.renderChime('done').equals(doneWav))
+check('the falling chime is its own sound', !doneWav.equals(errorWav))
+check('the rendered file is cached under the temp directory', host.chimeCachePath('done').startsWith(nodeOs.tmpdir()))
+check('the cache path carries a version', /chime-v\d+-done\.wav$/.test(host.chimeCachePath('done')))
+check('a short turn stays silent', host.shouldChime({ enabled: true, elapsedMs: 1200, minSeconds: 3, erroredAgoMs: Infinity }) === false)
+check('a long turn chimes', host.shouldChime({ enabled: true, elapsedMs: 9000, minSeconds: 3, erroredAgoMs: Infinity }) === true)
+check('a switched-off chime never fires', host.shouldChime({ enabled: false, elapsedMs: 60000, minSeconds: 0, erroredAgoMs: Infinity }) === false)
+check('a failure does not chime twice on the way out', host.shouldChime({ enabled: true, elapsedMs: 9000, minSeconds: 3, erroredAgoMs: 800 }) === false)
+check('the host listens for a turn ending', typeof statusListener === 'function' && typeof errorListener === 'function')
 
 // --------------------------------------------------------- on-demand service
 

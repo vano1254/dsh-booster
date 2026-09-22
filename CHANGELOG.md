@@ -1,3 +1,4 @@
+
 # Changelog
 
 All notable changes to `dsh-booster` are recorded here.
@@ -8,6 +9,13 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- A **completion chime**, off by default: the host listens to `agent/status` and plays a
+  sound when a turn goes `running` → `idle`, so it is heard even when the browser is
+  behind something else. The sound is **synthesised** — a felt-piano voice whose partials
+  sit slightly above n×f0, over a low F3+C4 bed with a rising G4→C5 on top — because
+  shipping a sample would mean shipping someone's asset. A minimum turn length keeps
+  one-line answers silent, errors get a falling variant instead, and the settings card can
+  play it on demand.
 - The VS Code tab **asks the host to start the service** when it is opened. A page
   cannot start a program, so it bumps `preview.startRequest`; the host starts code-server
   and writes the answer back into `preview.codeServer`, so the tab either becomes the

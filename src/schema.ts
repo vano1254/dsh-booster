@@ -11,8 +11,10 @@
 import Schema from '@deepseek-ai/schemastery'
 import {
   ACCENT_CHOICES,
+  CHIME_MIN_SECONDS,
   CODE_SERVER_STATES,
   DEFAULT_APPEARANCE,
+  DEFAULT_CHIME,
   DEFAULT_HEADER_TOOLS,
   DEFAULT_MODULES,
   DEFAULT_PREVIEW,
@@ -48,4 +50,10 @@ export const BoosterSchema = Schema.object({
     url: Schema.string().default(DEFAULT_PREVIEW.url),
     startRequest: Schema.number().default(DEFAULT_PREVIEW.startRequest),
   }).default({ ...DEFAULT_PREVIEW }),
+
+  chime: Schema.object({
+    minSeconds: Schema.union(CHIME_MIN_SECONDS.map((seconds) => Schema.const(seconds))).default(DEFAULT_CHIME.minSeconds),
+    onError: Schema.boolean().default(DEFAULT_CHIME.onError),
+    previewAt: Schema.number().default(DEFAULT_CHIME.previewAt),
+  }).default({ ...DEFAULT_CHIME }),
 })
