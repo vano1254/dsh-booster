@@ -8,6 +8,11 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- The VS Code tab **asks the host to start the service** when it is opened. A page
+  cannot start a program, so it bumps `preview.startRequest`; the host starts code-server
+  and writes the answer back into `preview.codeServer`, so the tab either becomes the
+  workbench or shows an accurate explanation with a start command and an install command.
+  The "no autostart, nothing idle" promise survives: only opening that tab starts it.
 - An **editable address field** in the web panel. It shows the address in force — a
   followed link included, so the panel never hides what it is showing — and a typed
   address **pins** the panel until "follow links" hands it back, so the page you are
@@ -45,6 +50,10 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- The VS Code tab said "not found" whenever the service simply **was not running**, which
+  reads as "not installed" and was wrong on a machine that had it. The wording now
+  separates "not running" from "not installed" and hands over the command that matches:
+  start, or install.
 - **A crash on any machine without `powershell.exe`.** Starting the service spawned the
   launcher with no `'error'` listener, and Node reports a missing binary asynchronously —
   so the failure arrived as an unhandled event and took the whole host process with it. On

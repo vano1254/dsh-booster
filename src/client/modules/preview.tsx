@@ -143,6 +143,17 @@ const CODE_SERVER_COMMAND = [
 ].join('\n')
 
 /**
+ * The command that starts a service that is already installed.
+ *
+ * The plugin registers no autostart on purpose, and the tab asks the host to start it
+ * when it is opened; this is the manual fallback for when that cannot work.
+ */
+const START_COMMAND = [
+  'cd "$env:USERPROFILE\\.dsh\\profiles\\web\\node_modules\\dsh-booster"',
+  'powershell -ExecutionPolicy Bypass -File tools\\start-code-server.ps1',
+].join('\n')
+
+/**
  * Ask whether anything is listening on the Sidebar service's port.
  *
  * `no-cors` is the whole trick: the response is opaque and never read, but the
@@ -668,6 +679,8 @@ export interface CodeServerRowProps {
   t: Translate
   /** Ask again, for someone who has just installed it. */
   recheck: () => void
+  /** True while a start has been asked for and the host has not answered yet. */
+  starting?: boolean
 }
 
 /**
@@ -681,18 +694,22 @@ export interface CodeServerRowProps {
  * @returns the status block.
  */
 export function CodeServerRow(props: CodeServerRowProps): ReactNode {
-  const { preview, set, t, recheck } = props
+  const { preview, set, t, recheck, starting = false } = props
   const [showCommand, setShowCommand] = useState(false)
   const state = preview.codeServer
 
   return (
     <div className="booster-codeserver" data-booster-code-server={state}>
       <div className="booster-row__label">{t('preview.codeServer.label')}</div>
-      <div className="booster-row__hint">{t(`preview.codeServer.state.${state}`)}</div>
+      <div className="booster-row__hint">
+        {starting ? t('preview.codeServer.state.starting') : t(`preview.codeServer.state.${state}`)}
+      </div>
 
-      {state === 'none' && (
+      {state !== 'have' && (
         <>
-          <div className="booster-row__hint">{t('preview.codeServer.hint')}</div>
+          <div className="booster-row__hint">
+            {starting ? t('preview.codeServer.startingHint') : t('preview.codeServer.hint')}
+          </div>
           <div className="booster-codeserver__actions">
             <button type="button" className="booster-button" onClick={() => setShowCommand((open) => !open)}>
               {t(showCommand ? 'preview.codeServer.hideCommand' : 'preview.codeServer.showCommand')}
@@ -706,7 +723,14 @@ export function CodeServerRow(props: CodeServerRowProps): ReactNode {
               </button>
             )}
           </div>
-          {showCommand && <pre className="booster-codeserver__command">{CODE_SERVER_COMMAND}</pre>}
+          {showCommand && (
+            <>
+              <div className="booster-row__hint">{t('preview.codeServer.startLabel')}</div>
+              <pre className="booster-codeserver__command">{START_COMMAND}</pre>
+              <div className="booster-row__hint">{t('preview.codeServer.installLabel')}</div>
+              <pre className="booster-codeserver__command">{CODE_SERVER_COMMAND}</pre>
+            </>
+          )}
         </>
       )}
 
@@ -737,14 +761,33 @@ function VSCodePanel(props: { t: Translate; store: BoosterStore }): ReactNode {
 
   useEffect(() => store.subscribe(() => setPreview(store.get().preview)), [store])
 
+  // Re-checking is also the way to ask again: the probe writes an answer, and a fresh
+  // request goes out when the answer is still "not there".
   const recheck = (): void => {
+    startAsked = false
     void resolveCodeServer({ settings: store.get().preview, set: (value) => store.set('preview', value) })
   }
+
+  // Opening this tab is the user asking for the workbench, and a page cannot start a
+  // program — so bump `startRequest` and let the host do it. The host answers in
+  // `codeServer` either way, which is why nothing here has to poll.
+  const asked = preview.startRequest > 0
+  useEffect(() => {
+    if (preview.codeServer === 'have' || asked || startAsked) return
+    startAsked = true
+    store.set('preview', { ...store.get().preview, startRequest: Date.now() })
+  }, [preview.codeServer, asked, store])
 
   if (preview.codeServer !== 'have') {
     return (
       <div className="booster-preview__empty">
-        <CodeServerRow preview={preview} set={(value) => store.set('preview', value)} t={t} recheck={recheck} />
+        <CodeServerRow
+          preview={preview}
+          set={(value) => store.set('preview', value)}
+          t={t}
+          recheck={recheck}
+          starting={asked}
+        />
       </div>
     )
   }
@@ -765,6 +808,9 @@ function VSCodePanel(props: { t: Translate; store: BoosterStore }): ReactNode {
  * settings change, and a module re-apply must not ask again.
  */
 let probedOnce = false
+
+/** Whether this page load has already asked the host to start the service. */
+let startAsked = false
 /** The preview module. */
 export const previewModule: BoosterModule = {
   id: 'preview',

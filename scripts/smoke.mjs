@@ -96,11 +96,24 @@ const marker = nodePath.join(bridgeRoot, 'code-server', 'bridge', 'open-request.
 
 const config = { preview: { linkMode: 'all', fileOpen: 'vscode' } }
 let settle
+let settingsUpdated
+const answerWrites = []
 host.apply({
   inject: (_names, callback) => callback({ settings: { register: () => {} } }),
-  get: (name) => (name === 'settings' ? { get: () => config } : undefined),
+  get: (name) =>
+    name === 'settings'
+      ? {
+          get: () => config,
+          // The host answers a start request by replacing the section.
+          replace: (ns, section) => {
+            answerWrites.push({ ns, section })
+            return Promise.resolve()
+          },
+        }
+      : undefined,
   on: (event, listener) => {
     if (event === 'tools/result') settle = listener
+    if (event === 'settings/updated') settingsUpdated = listener
     return () => {}
   },
 })
@@ -230,6 +243,32 @@ if (process.platform === 'win32') {
   await new Promise((resolve) => setTimeout(resolve, 600))
   check('off Windows the start is skipped instead of spawning a missing binary', nodeFs.existsSync(ranFile) === false)
 }
+
+// A browser page cannot start a program, so the VS Code tab bumps
+// `preview.startRequest` and the host answers in `preview.codeServer`. A throwaway
+// listener on the port makes that answer deterministic; LOCALAPPDATA stays pointed at
+// the fake install so that even a real spawn attempt can only run the fake launcher.
+check('the host listens for a start request', typeof settingsUpdated === 'function')
+process.env.LOCALAPPDATA = fakeRoot
+config.preview.fileOpen = 'vscode'
+answerWrites.length = 0
+const fakeService = nodeNet.createServer()
+try {
+  await new Promise((resolve, reject) => {
+    fakeService.once('error', reject)
+    fakeService.listen(8443, '127.0.0.1', resolve)
+  })
+} catch {
+  // The port is already owned (a real code-server is running); the host reads that as
+  // "up" as well, so the expectation does not change.
+}
+settingsUpdated('booster', { preview: { fileOpen: 'vscode', startRequest: Date.now() + 1 } })
+await waitFor(() => answerWrites.length > 0, 9000)
+const startAnswer = answerWrites.at(-1)?.section?.preview
+check('a start request is answered where the browser can see it', startAnswer?.codeServer === 'have')
+check('and the request is cleared so the tab stops waiting', startAnswer?.startRequest === 0)
+await new Promise((resolve) => fakeService.close(resolve))
+process.env.LOCALAPPDATA = savedLocalAppData
 
 nodeFs.rmSync(fakeRoot, { recursive: true, force: true })
 // ------------------------------------------------------- mini React harness
@@ -810,6 +849,21 @@ const openedBeforeTyped = openTabCalls.length
 chatValue = { legacy: { runningCalls: [], nodes: [replyWith(9, 'https://example.com/ignored')] } }
 mount(typedWatcher.component, { useChat: useChatStub, sessionId: 'sess-1' })
 check('a typed address is not replaced by a later link', openTabCalls.length === openedBeforeTyped)
+
+// The VS Code tab asks the host to start the service. Asking is a settings write, and
+// every write re-applies this module, so it must happen once per page load — otherwise
+// the tab would ask, re-apply, ask again, forever.
+scopeTo({ fileOpen: 'vscode', codeServer: 'none' })
+const askingTab = liveRegistration((r) => r.options.key === VSCODE_TYPE?.id)
+const asksMade = () => scopeWrites.filter((w) => w.field === 'preview' && w.value?.startRequest > 0).length
+const asksBefore = asksMade()
+mount(askingTab.component, {})
+await waitFor(() => asksMade() > asksBefore, 2000)
+check('the VS Code tab asks the host to start the service', asksMade() > asksBefore)
+const writesAfterAsk = scopeWrites.length
+mount(askingTab.component, {})
+await new Promise((resolve) => setTimeout(resolve, 150))
+check('and it asks only once per page load', scopeWrites.length === writesAfterAsk)
 
 // The bridge is chosen but no service answered: a written file still has to appear
 // somewhere. Re-apply with exactly that configuration and watch where it opens.

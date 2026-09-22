@@ -99,13 +99,18 @@ function quotePowerShell(value: string): string {
  *
  * @param env - the environment to read, defaulting to the process environment.
  * @param port - the port to probe, defaulting to the shipped one.
+ * @param force - start even inside the retry window, for a user-initiated request.
  */
-export async function ensureService(env: NodeJS.ProcessEnv = process.env, port = SERVICE_PORT): Promise<void> {
+export async function ensureService(
+  env: NodeJS.ProcessEnv = process.env,
+  port = SERVICE_PORT,
+  force = false,
+): Promise<void> {
   try {
     if (await isListening(port)) return
 
     const now = Date.now()
-    if (now - lastAttempt < RETRY_MS) return
+    if (!force && now - lastAttempt < RETRY_MS) return
 
     const launcher = await findLauncher(env)
     if (launcher === undefined) return

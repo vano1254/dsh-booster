@@ -70,6 +70,15 @@ export interface PreviewSettings {
    * empty field restores following.
    */
   url: string
+  /**
+   * A start request from the browser, as a timestamp the client bumps.
+   *
+   * A page cannot start a program, so opening the VS Code tab writes a fresh value
+   * here and the host half — which can — starts the service when it sees the value
+   * change. That keeps the "no autostart, no idle memory" promise while still making
+   * the tab work the first time it is opened.
+   */
+  startRequest: number
 }
 
 /** The whole `booster` settings section. */
@@ -109,6 +118,7 @@ export const DEFAULT_PREVIEW: PreviewSettings = {
   fileOpen: 'vscode',
   codeServer: 'unknown',
   url: '',
+  startRequest: 0,
 }
 
 /** Every selectable accent, in menu order; labels live in the client locale. */
