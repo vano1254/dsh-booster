@@ -9,7 +9,7 @@
 - 这是**我自己日常在用的那份**，顺手整理出来的，不是团队维护的产品。
 - **不保证在你的 DSH 版本或系统上同样好用**；没有兼容性承诺，issue / PR 随缘看。
 - **后续随缘更新**：我用到什么、烦什么就加什么改什么。想要稳定的东西，建议 fork 自己维护。
-- 当前 `0.3.0-beta.2`：beta 阶段，配置项和默认值还可能变。
+- 当前 `0.3.0-beta.3`：beta 阶段，配置项和默认值还可能变。
 
 先说三件可能影响你决定的事：
 
@@ -39,7 +39,7 @@ New-Item -ItemType Junction -Path "$dp\node_modules\dsh-booster" -Target "C:\pat
 **命令行版**（`dsh web`，profile 是 `web`）：
 
 ```sh
-dsh plugin --profile web add https://github.com/vano1254/dsh-booster/archive/refs/tags/v0.3.0-beta.2.tar.gz
+dsh plugin --profile web add https://github.com/vano1254/dsh-booster/archive/refs/tags/v0.3.0-beta.3.tar.gz
 # 本地开发：源码改动即时可见，仍需重启
 dsh plugin --profile web add link:/absolute/path/to/dsh-booster
 ```
@@ -96,7 +96,7 @@ powershell -ExecutionPolicy Bypass -File (Join-Path $d.FullName 'tools\setup-cod
 
 DSH 0.1.6 把插件的两块功能收进了产品本身（侧边栏以浏览器模式访问 URL、文件引用与交付文件默认侧边栏预览 + 回合结束的文件改动卡片），所以 **0.3.0-beta.1 删掉了**网页面板、链接跟随、可手填地址栏与文档预览路由，那个 997 行的模块整个没了。
 
-紧接着 0.1.7 又改掉了插件的设置通道，于是 **0.3.0-beta.2 又删掉了**自己画的设置页、模块管理器与设置 store —— 现在配置由产品的插件管理器渲染，插件只声明一个 `Config`。客户端产物因此 **62.8 KB → 15.2 KB**。
+紧接着 0.1.7 又改掉了插件的设置通道，于是 **0.3.0-beta.3 又删掉了**自己画的设置页、模块管理器与设置 store —— 现在配置由产品的插件管理器渲染，插件只声明一个 `Config`。客户端产物因此 **62.8 KB → 15.2 KB**。
 
 ### 一次真实的启动失败（写在这里免得别人再踩）
 

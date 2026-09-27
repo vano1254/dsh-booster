@@ -5,6 +5,23 @@ All notable changes to `dsh-booster` are recorded here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0-beta.3] - 2026-09-28
+
+### Fixed
+
+- **The VS Code tab could not be opened from the UI.** The right Sidebar's user-facing
+  surface is its guide page, and a tab type appears there only by contributing a `guide`
+  entry capsule — a bare type registers fine and stays invisible. The rework registered the
+  type without one, and it had also removed the two older ways in (a settings-page button
+  and a dock watcher that opened it programmatically), so there was no way left to reach the
+  workbench. The definition now carries a guide entry, and the suite asserts it — verified
+  by mutation: dropping `guide` turns the suite red.
+
+### Changed
+
+- `ensureService` lost its unused `force` parameter, left over from the start-request path
+  that was deleted in beta.2.
+
 ## [0.3.0-beta.2] - 2026-09-28
 
 ### Fixed
