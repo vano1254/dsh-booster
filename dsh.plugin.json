@@ -1,10 +1,10 @@
 {
   "id": "dsh-booster",
-  "version": "0.3.0-beta.1",
+  "version": "0.3.0-beta.2",
   "main": "lib/index.js",
-  "description": "DSH 增强套件：右侧栏里的真 VS Code（按需启动）、外观与标题栏工具、完成提示音（设置页统一开关，配置写入 settings.yaml）。",
+  "description": "DSH 增强套件：右侧栏里的真 VS Code（按需启动）+ 完成提示音（宿主机播放）。配置由产品的插件管理器渲染。",
   "engines": {
-    "dsh": ">=0.1.5-rc.1"
+    "dsh": ">=0.1.7-rc.2"
   },
   "contributes": {
     "tools": [],

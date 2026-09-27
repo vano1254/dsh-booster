@@ -1,22 +1,32 @@
 /**
- * Deterministic smoke test for both halves of dsh-booster.
+ * Deterministic smoke test for dsh-booster, as the plugin stands after the 0.1.7 rework.
  *
- * It runs the real build output against stub services, so it verifies behaviour
- * rather than shape: the host registers the namespace and its schema resolves
- * defaults, a settled file edit reaches the bridge only when the user asked for
- * VS Code, the module manager really tears contributions down when a switch
- * flips, and the VS Code tab is a tab type of its own whose frame address carries
- * no `?folder=`. No GUI restart, no browser.
+ * It runs the real build output (`lib/index.js`, `lib/client.js`) against stub services, so
+ * it checks behaviour rather than shape: the client declares only a dependency the live
+ * client catalog can supply, the host bridge drops a marker only for a settled file tool
+ * when the user asked for VS Code, and the chime is a real WAV.
  *
- * Run with: node scripts/smoke.mjs
+ * The first thing this suite proves is `inject`. The previous version declared the client
+ * service `settingsScope`, which 0.1.7 removed: the entry then waited for a service that
+ * could never arrive, stayed pending, and the whole app refused to boot. That assertion is
+ * therefore first and is meant to be loud.
+ *
+ * `normalizeConfig` is not re-exported from the host entry, so its coercion rules are read
+ * from `src/config.ts` directly (Node strips the types; the file is side-effect free). The
+ * built `Config` schema is cross-checked against `DEFAULT_CONFIG` from the same file, which
+ * is what catches a `lib/` that has fallen behind `src/`.
+ *
+ * Run with: node scripts/smoke.mjs   (or: npm run smoke)
  */
-import { readFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { dirname, join, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import vm from 'node:vm'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const failures = []
+let passed = 0
 
 /**
  * Assert one expectation.
@@ -25,6 +35,7 @@ const failures = []
  */
 function check(label, condition) {
   if (condition) {
+    passed += 1
     console.log(`  ok   ${label}`)
   } else {
     console.log(`  FAIL ${label}`)
@@ -33,287 +44,66 @@ function check(label, condition) {
 }
 
 /**
- * Record something that depends on this host's capabilities rather than on the code.
- *
- * Never fails the run, and says why: a managed desktop or a CI runner can refuse WMI
- * process creation, which tells us nothing about the plugin. Capabilities the plugin
- * itself must guarantee are still asserted with `check`.
- *
- * @param {string} label - what is being observed.
- * @param {unknown} condition - truthy when the observation held on this host.
+ * Print a section banner.
+ * @param {string} title - the section name.
  */
-function observe(label, condition) {
-  console.log(`  ${condition ? 'ok  ' : 'skip'} ${label}${condition ? '' : '  (this host did not allow it)'}`)
+function banner(title) {
+  console.log(`\n${title}`)
 }
 
-// ---------------------------------------------------------------- host half
-
-console.log('\nhost half')
-
-const host = await import(new URL('../lib/index.js', import.meta.url).href)
-check('exports name "dsh-booster"', host.name === 'dsh-booster')
-check('exports apply()', typeof host.apply === 'function')
-
-const registrations = []
-let toolResultListener
-host.apply({
-  inject(names, callback) {
-    check('injects the optional settings service', Array.isArray(names) && names.includes('settings'))
-    callback({ settings: { register: (ns, schema) => registrations.push({ ns, schema }) } })
-  },
-  get: () => undefined,
-  on(event, listener) {
-    if (event === 'tools/result') toolResultListener = listener
-    return () => {}
-  },
-})
-check('host subscribes to settled tool results', typeof toolResultListener === 'function')
-
-check('registers exactly one namespace', registrations.length === 1)
-check('namespace is "booster"', registrations[0]?.ns === 'booster')
-
-const resolved = registrations[0]?.schema({})
-check(
-  'schema resolves module defaults',
-  resolved?.modules?.vscode === true && resolved?.modules?.appearance === true && resolved?.modules?.headerTools === true,
-)
-check('schema resolves appearance defaults', resolved?.appearance?.accent === 'default' && resolved?.appearance?.fontFamily === 'default')
-check('schema resolves header-tools defaults', resolved?.headerTools?.sidebarToggle === true && resolved?.headerTools?.readingSize === true)
-check(
-  'schema resolves the vscode section defaults',
-  resolved?.vscode?.fileOpen === 'vscode' && resolved?.vscode?.codeServer === 'unknown' && resolved?.vscode?.startRequest === 0,
-)
-check('schema resolves the chime defaults', resolved?.chime?.minSeconds === 3 && resolved?.chime?.onError === true)
-
-// ------------------------------------------------------------- host bridge
-
-console.log('\nhost bridge')
-
-const nodeOs = await import('node:os')
-const nodeFs = await import('node:fs')
-const nodePath = await import('node:path')
-
-// The marker path is resolved per call, so pointing LOCALAPPDATA at a temp root
-// keeps this test off the real machine.
-const bridgeRoot = nodeFs.mkdtempSync(nodePath.join(nodeOs.tmpdir(), 'booster-bridge-'))
-const savedLocalAppData = process.env.LOCALAPPDATA
-process.env.LOCALAPPDATA = bridgeRoot
-const marker = nodePath.join(bridgeRoot, 'code-server', 'bridge', 'open-request.json')
-
-// A fresh install with no stored section at all: the normalizer fills in
-// `fileOpen: 'vscode'`, which is the target the bridge serves.
-const config = { vscode: { fileOpen: 'vscode' } }
-let settle
-let settingsUpdated
-let statusListener
-let errorListener
-const answerWrites = []
-host.apply({
-  inject: (_names, callback) => callback({ settings: { register: () => {} } }),
-  get: (name) =>
-    name === 'settings'
-      ? {
-          get: () => config,
-          // The host answers a start request by replacing the section.
-          replace: (ns, section) => {
-            answerWrites.push({ ns, section })
-            return Promise.resolve()
-          },
-        }
-      : undefined,
-  on: (event, listener) => {
-    if (event === 'tools/result') settle = listener
-    if (event === 'settings/updated') settingsUpdated = listener
-    if (event === 'agent/status') statusListener = listener
-    if (event === 'agent/error') errorListener = listener
-    return () => {}
-  },
-})
-check('the bridge subscribes to settled results', typeof settle === 'function')
+/**
+ * Wait for a fixed time, using real timers.
+ * @param {number} ms - how long.
+ * @returns {Promise<void>} resolved after the delay.
+ */
+function delay(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms)
+  })
+}
 
 /**
- * Wait until a condition holds, or give up.
- *
- * Fixed sleeps flake: a 60 ms wait for an asynchronous file write held on an idle
- * desktop and failed on a cold CI runner, which is a red build that says nothing about
- * the code. Polling the condition is both faster and steadier.
- *
- * @param {() => boolean} predicate - the condition to wait for; it may throw while not ready.
- * @param {number} [timeoutMs] - how long to wait before giving up.
- * @returns {Promise<boolean>} whether the condition held.
+ * Give every pending microtask a chance to run.
+ * @returns {Promise<void>} resolved once the queue has drained.
  */
-async function waitFor(predicate, timeoutMs = 3000) {
+function flush() {
+  return new Promise((resolve) => {
+    setImmediate(resolve)
+  })
+}
+
+/**
+ * Poll until a predicate holds.
+ * @param {() => unknown} predicate - the condition.
+ * @param {number} [timeoutMs] - how long to keep asking.
+ * @returns {Promise<boolean>} whether it held in time.
+ */
+async function waitFor(predicate, timeoutMs = 2500) {
   const deadline = Date.now() + timeoutMs
   for (;;) {
     try {
       if (predicate()) return true
     } catch {
-      // Not ready yet.
+      // Not readable yet; keep asking until the budget runs out.
     }
-    if (Date.now() > deadline) return false
-    await new Promise((resolve) => setTimeout(resolve, 25))
+    if (Date.now() >= deadline) return false
+    await delay(25)
   }
 }
 
-const readMarker = () => JSON.parse(nodeFs.readFileSync(marker, 'utf8'))
-const writeAndSettle = async (name, args, isError = false) => {
-  settle({ name, arguments: args }, { isError })
-  // Negative assertions ("no request was dropped") need a window in which the request
-  // could have appeared; positive ones poll below.
-  await new Promise((resolve) => setTimeout(resolve, 200))
+/**
+ * Compare two values by their JSON shape.
+ * @param {unknown} a - one value.
+ * @param {unknown} b - the other.
+ * @returns {boolean} whether they serialise identically.
+ */
+function same(a, b) {
+  return JSON.stringify(a) === JSON.stringify(b)
 }
 
-await writeAndSettle('write', { file_path: 'C:/work/a.ts' })
-check('a settled write drops a bridge request', await waitFor(() => nodeFs.existsSync(marker)))
-check('the request names the written file', await waitFor(() => readMarker().path === 'C:/work/a.ts'))
-check('the request is stamped for ordering', typeof readMarker().at === 'number')
-check('no temp file is left behind', !nodeFs.existsSync(`${marker}.tmp`))
-
-await writeAndSettle('write', { file_path: 'C:/work/b.ts' }, true)
-check('a failed write drops no request', readMarker().path === 'C:/work/a.ts')
-
-await writeAndSettle('bash', { command: 'ls' })
-check('a non-file tool drops no request', readMarker().path === 'C:/work/a.ts')
-
-await writeAndSettle('edit', { file_path: 'C:/work/c.ts' })
-check('a settled edit does drop one', await waitFor(() => readMarker().path === 'C:/work/c.ts'))
-
-// Only `vscode` routes a file anywhere now, and the `off` target has to leave the
-// bridge alone: it is the user saying "do not open anything".
-config.vscode.fileOpen = 'off'
-await writeAndSettle('write', { file_path: 'C:/work/e.ts' })
-check('the off target leaves the bridge silent', readMarker().path === 'C:/work/c.ts')
-
-config.vscode.fileOpen = 'vscode'
-await writeAndSettle('write', { file_path: 'C:/work/f.ts' })
-check('choosing VS Code again drops the next request', await waitFor(() => readMarker().path === 'C:/work/f.ts'))
-
-process.env.LOCALAPPDATA = savedLocalAppData
-nodeFs.rmSync(bridgeRoot, { recursive: true, force: true })
-
-// ------------------------------------------------------------ completion chime
-
-console.log('\ncompletion chime')
-
-const doneWav = host.renderChime('done')
-const errorWav = host.renderChime('error')
-check(
-  'the completion chime renders a RIFF/WAVE file',
-  doneWav.subarray(0, 4).toString() === 'RIFF' && doneWav.subarray(8, 12).toString() === 'WAVE',
-)
-check('its declared length matches its bytes', doneWav.readUInt32LE(4) === doneWav.length - 8 && doneWav.readUInt32LE(40) === doneWav.length - 44)
-check('it is mono 16-bit at 44.1 kHz', doneWav.readUInt16LE(22) === 1 && doneWav.readUInt16LE(34) === 16 && doneWav.readUInt32LE(24) === 44100)
-check('rendering is deterministic', host.renderChime('done').equals(doneWav))
-check('the falling chime is its own sound', !doneWav.equals(errorWav))
-check('the rendered file is cached under the temp directory', host.chimeCachePath('done').startsWith(nodeOs.tmpdir()))
-check('the cache path carries a version', /chime-v\d+-done\.wav$/.test(host.chimeCachePath('done')))
-check('a short turn stays silent', host.shouldChime({ enabled: true, elapsedMs: 1200, minSeconds: 3, erroredAgoMs: Infinity }) === false)
-check('a long turn chimes', host.shouldChime({ enabled: true, elapsedMs: 9000, minSeconds: 3, erroredAgoMs: Infinity }) === true)
-check('a switched-off chime never fires', host.shouldChime({ enabled: false, elapsedMs: 60000, minSeconds: 0, erroredAgoMs: Infinity }) === false)
-check('a failure does not chime twice on the way out', host.shouldChime({ enabled: true, elapsedMs: 9000, minSeconds: 3, erroredAgoMs: 800 }) === false)
-check('the host listens for a turn ending', typeof statusListener === 'function' && typeof errorListener === 'function')
-
-// --------------------------------------------------------- on-demand service
-
-console.log('\non-demand service')
-
-const nodeNet = await import('node:net')
-const hostEntry = await import(new URL('../lib/index.js', import.meta.url).href)
-check(
-  'the host entry exposes the service helpers',
-  typeof hostEntry.findLauncher === 'function' && typeof hostEntry.ensureService === 'function',
-)
-
-// A fake install layout: proves discovery without touching the real service. The
-// fake launcher records that it ran, which is how the spawn path is verified.
-const fakeRoot = nodeFs.mkdtempSync(nodePath.join(nodeOs.tmpdir(), 'booster-svc-'))
-const fakeBin = nodePath.join(fakeRoot, 'code-server', 'code-server-9.9.9-windows-amd64', 'bin')
-nodeFs.mkdirSync(fakeBin, { recursive: true })
-const ranFile = nodePath.join(fakeRoot, 'launcher-ran.txt')
-const fakeLauncher = nodePath.join(fakeBin, 'code-server.cmd')
-nodeFs.writeFileSync(fakeLauncher, `@echo off\r\necho ran > "${ranFile}"\r\n`)
-
-check(
-  'a code-server-* install is discovered',
-  (await hostEntry.findLauncher({ LOCALAPPDATA: fakeRoot })) === fakeLauncher,
-)
-check(
-  'a machine without the install reports no launcher',
-  (await hostEntry.findLauncher({ LOCALAPPDATA: nodePath.join(fakeRoot, 'nowhere') })) === undefined,
-)
-
-// Nothing listening, no launcher: it must resolve quietly and spawn nothing.
-let threw = false
-try {
-  await hostEntry.ensureService({ LOCALAPPDATA: nodePath.join(fakeRoot, 'nowhere') }, 59999)
-} catch {
-  threw = true
-}
-check('it resolves quietly when it can do nothing', threw === false)
-
-// Something already listening: it must short-circuit instead of starting a second.
-const probe = nodeNet.createServer()
-await new Promise((resolve) => probe.listen(0, '127.0.0.1', resolve))
-const probePort = probe.address().port
-check('a listening port is detected', (await hostEntry.isListening(probePort)) === true)
-await hostEntry.ensureService({ LOCALAPPDATA: fakeRoot }, probePort)
-check('an already-running service is not started again', nodeFs.existsSync(ranFile) === false)
-await new Promise((resolve) => probe.close(resolve))
-
-// Nothing listening but a launcher present: on Windows the WMI command should run it.
-// Whether this host permits WMI process creation is the host's business — GitHub's
-// Windows runners refuse it — so in CI this is reported rather than asserted, and it
-// stays a hard assertion everywhere else. Everywhere off Windows the start must be
-// skipped, which is the part the plugin itself guarantees.
-if (process.platform === 'win32') {
-  await hostEntry.ensureService({ LOCALAPPDATA: fakeRoot }, 59998)
-  let launched = false
-  for (let attempt = 0; attempt < 80 && !launched; attempt += 1) {
-    await new Promise((resolve) => setTimeout(resolve, 250))
-    launched = nodeFs.existsSync(ranFile)
-  }
-  if (process.env.CI) {
-    observe('the WMI start path runs the launcher on this host', launched)
-  } else {
-    check('a missing service is started through the WMI command', launched)
-  }
-} else {
-  await hostEntry.ensureService({ LOCALAPPDATA: fakeRoot }, 59998)
-  await new Promise((resolve) => setTimeout(resolve, 600))
-  check('off Windows the start is skipped instead of spawning a missing binary', nodeFs.existsSync(ranFile) === false)
-}
-
-// A browser page cannot start a program, so the VS Code tab bumps
-// `vscode.startRequest` and the host answers in `vscode.codeServer`. A throwaway
-// listener on the port makes that answer deterministic; LOCALAPPDATA stays pointed at
-// the fake install so that even a real spawn attempt can only run the fake launcher.
-check('the host listens for a start request', typeof settingsUpdated === 'function')
-process.env.LOCALAPPDATA = fakeRoot
-config.vscode.fileOpen = 'vscode'
-answerWrites.length = 0
-const fakeService = nodeNet.createServer()
-try {
-  await new Promise((resolve, reject) => {
-    fakeService.once('error', reject)
-    fakeService.listen(8443, '127.0.0.1', resolve)
-  })
-} catch {
-  // The port is already owned (a real code-server is running); the host reads that as
-  // "up" as well, so the expectation does not change.
-}
-settingsUpdated('booster', { vscode: { fileOpen: 'vscode', startRequest: Date.now() + 1 } })
-await waitFor(() => answerWrites.length > 0, 9000)
-const startAnswer = answerWrites.at(-1)?.section?.vscode
-check('a start request is answered where the browser can see it', startAnswer?.codeServer === 'have')
-check('and the request is cleared so the tab stops waiting', startAnswer?.startRequest === 0)
-check('and the rest of the section survives the answer', startAnswer?.fileOpen === 'vscode')
-await new Promise((resolve) => fakeService.close(resolve))
-process.env.LOCALAPPDATA = savedLocalAppData
-
-nodeFs.rmSync(fakeRoot, { recursive: true, force: true })
 // ------------------------------------------------------- mini React harness
 
-/** Persistent hook cells per component identity, so refs survive re-renders. */
+/** Persistent hook cells per component identity, so state survives a re-render. */
 const hookCells = new Map()
 let activeCells = null
 let cursor = 0
@@ -346,6 +136,7 @@ const element = (type, props) => ({ type, props, __el: true })
 
 /** Fallback cells for a component invoked outside the harness. */
 const scratchCells = []
+const cleanups = []
 
 const reactStub = {
   useState(initial) {
@@ -371,7 +162,9 @@ const reactStub = {
   useEffect(effect) {
     // Effects run on every render; the persistent cells above keep them idempotent.
     cursor++
-    return effect()
+    const cleanup = effect()
+    if (typeof cleanup === 'function') cleanups.push(cleanup)
+    return cleanup
   },
   useCallback: (fn) => fn,
   useMemo: (fn) => fn(),
@@ -387,8 +180,8 @@ const requireStub = (name) => {
 }
 
 /**
- * Expand a stub element tree the way React would: invoke function components
- * (through the hook harness) and descend into children.
+ * Expand a stub element tree the way React would: invoke function components (through the
+ * hook harness) and descend into children.
  * @param {unknown} node - the element tree.
  * @param {number} depth - recursion guard.
  * @returns {unknown} the expanded tree.
@@ -407,9 +200,8 @@ function expand(node, depth = 0) {
 }
 
 /**
- * Mount one slot component with props and expand the result.
- *
- * @param {Function} component - the registered component.
+ * Mount one component with props and expand the result.
+ * @param {Function} component - the component to mount.
  * @param {object} [props] - the props its seat supplies.
  * @returns {unknown} the expanded element tree.
  */
@@ -418,27 +210,16 @@ function mount(component, props = {}) {
 }
 
 /**
- * Collect props from an expanded element tree.
- * @param {unknown} node - the expanded tree.
- * @param {string} key - the prop name to collect.
- * @returns {unknown[]} every value found for that prop.
+ * Mount a component, let its effects settle, and mount it again — which is what a real
+ * React tree would do when an effect updates state.
+ * @param {Function} component - the component to mount.
+ * @param {object} [props] - the props its seat supplies.
+ * @returns {Promise<unknown>} the second render's expanded tree.
  */
-function collectProp(node, key) {
-  const found = []
-  const walk = (current) => {
-    if (current === null || typeof current !== 'object') return
-    if (Array.isArray(current)) {
-      for (const child of current) walk(child)
-      return
-    }
-    if (current.props !== undefined && current.props !== null) {
-      if (typeof current.props[key] === 'function') found.push(current.props[key])
-      walk(current.props.children)
-    }
-    if (current.children !== undefined) walk(current.children)
-  }
-  walk(node)
-  return found
+async function mountTwice(component, props = {}) {
+  mount(component, props)
+  await flush()
+  return mount(component, props)
 }
 
 /**
@@ -466,407 +247,375 @@ function collectText(node) {
   return text
 }
 
-/**
- * Collect any prop value (not only functions) from an expanded element tree.
- * @param {unknown} node - the expanded tree.
- * @param {string} key - the prop name to collect.
- * @returns {unknown[]} every value found for that prop.
- */
-function collectValue(node, key) {
-  const found = []
-  const walk = (current) => {
-    if (current === null || typeof current !== 'object') return
-    if (Array.isArray(current)) {
-      for (const child of current) walk(child)
-      return
+/** Run every effect cleanup collected so far. */
+function runCleanups() {
+  for (const cleanup of cleanups.splice(0)) {
+    try {
+      cleanup()
+    } catch {
+      // A cleanup that throws is not what this suite is about.
     }
-    if (current.props !== undefined && current.props !== null) {
-      if (current.props[key] !== undefined) found.push(current.props[key])
-      walk(current.props.children)
-    }
-    if (current.children !== undefined) walk(current.children)
   }
-  walk(node)
-  return found
 }
 
 // -------------------------------------------------------------- client half
 
-console.log('\nclient half')
-
-let factory
-const sandbox = {
-  window: { __ModuleLoader__: { load: (spec) => { factory = spec.factory } } },
-  console,
-  document: undefined,
-  setTimeout,
-  clearTimeout,
-  queueMicrotask,
-}
-sandbox.globalThis = sandbox
-vm.createContext(sandbox)
-vm.runInContext(readFileSync(join(root, 'lib', 'client.js'), 'utf8'), sandbox, { filename: 'client.js' })
-check('bundle registers a ModuleLoader factory', typeof factory === 'function')
-
-const client = factory(requireStub)
-check('exports apply()', typeof client.apply === 'function')
-check('injects slots + settingsScope', Array.isArray(client.inject) && client.inject.includes('slots') && client.inject.includes('settingsScope'))
-// The workbench entry point and the probe are re-exported from the bundle that
-// actually ships, so they can be exercised without the page.
-check(
-  're-exports the workbench entry point and the code-server probe',
-  typeof client.openVSCodeTab === 'function' && typeof client.resolveCodeServer === 'function',
-)
-
-const slotRegistrations = []
-const disposedSlots = []
-const themeWrites = []
-const accentLayers = []
-const sidebarToggles = []
-const scopeWrites = []
-const tabsRegistered = []
-const openTabCalls = []
-const scopeListeners = new Set()
-let scopeValue
-
-const scope = {
-  getSnapshot: () => ({ value: scopeValue, revision: 1, writable: true, mode: 'host' }),
-  subscribe(listener) {
-    scopeListeners.add(listener)
-    return () => scopeListeners.delete(listener)
-  },
-  set(field, value) {
-    scopeWrites.push({ field, value })
-    scopeValue = { ...(scopeValue ?? {}), [field]: value }
-    for (const listener of [...scopeListeners]) listener()
-  },
-}
-
-const optionalServices = {
-  theme: {
-    getTheme: () => ({ fontSize: 14, preference: 'system', active: { id: 'light' } }),
-    setFontSize: (px) => themeWrites.push(px),
-    setTheme: () => {},
-    register: () => () => {},
-    overrideTokens: (source, tokens) => {
-      accentLayers.push({ source, tokens })
-      return () => {}
-    },
-  },
-  layout: { toggleSidebar: () => sidebarToggles.push(true) },
-  // `locale` is deliberately absent: the fallback translator must take over.
-}
-
-// The right Sidebar publishes these through `ctx.reflect.provide`, not as
-// Cordis services, so the module resolves them through the reflect face. Only a
-// tab-type registry and the open-by-kind entry point remain.
-const reflectServices = {
-  sidebarRightTabs: {
-    register: (definition) => {
-      tabsRegistered.push(definition)
-      return () => {}
-    },
-  },
-  sidebarRight: {
-    openTab: (kind, options) => openTabCalls.push({ kind, options }),
-  },
-}
-
-const ctx = {
-  get: (name) => optionalServices[name],
-  reflect: { get: (name) => reflectServices[name] },
-  on: () => () => {},
-  effect: (callback) => callback(),
-  slots: {
-    inject: (_key, callback) => callback(),
-    register: (options, component) => {
-      const record = { options, component, disposed: false }
-      slotRegistrations.push(record)
-      return () => {
-        record.disposed = true
-        disposedSlots.push(options.name)
-      }
-    },
-  },
-  settingsScope: { bind: () => scope },
-}
-
-// The VS Code tab only frames the workbench when the service is known to answer,
-// so this start point is the one where the frame is on screen.
-scopeValue = {
-  modules: { vscode: true, appearance: true, headerTools: true },
-  vscode: { fileOpen: 'vscode', codeServer: 'have', startRequest: 0 },
-}
-client.apply(ctx)
-
-const liveNames = () => slotRegistrations.filter((r) => !r.disposed).map((r) => r.options.name)
-const findRegistration = (predicate) => slotRegistrations.find(predicate)
-const liveRegistration = (predicate) => slotRegistrations.filter(predicate).at(-1)
-const scopeTo = (vscode) => {
-  scopeValue = {
-    modules: { vscode: true, appearance: true, headerTools: true },
-    vscode: { fileOpen: 'vscode', codeServer: 'have', startRequest: 0, ...vscode },
-  }
-  for (const listener of [...scopeListeners]) listener()
-}
-
-check('registers the settings page', liveNames().includes('settings.section'))
-check('applies every default module', liveNames().includes('conversation.session.header.utilities'))
-check('no accent layer for the default accent', accentLayers.length === 0)
-check('registers the tab type the workbench needs', tabsRegistered.length === 1)
-check('tab type is the plugin-owned VS Code page type', tabsRegistered[0]?.kind === 'booster-vscode')
-check('tab type declares an extension-band priority', tabsRegistered[0]?.priority === 'extension')
-check('tab type title is localized lazily', typeof tabsRegistered[0]?.title === 'function')
-
-const VSCODE_TYPE = tabsRegistered[0]
-
-const header = findRegistration((r) => r.options.name === 'conversation.session.header.utilities')
-check('header component renders without throwing', (() => {
-  try {
-    return mount(header.component) !== null
-  } catch (error) {
-    console.error('   ', error.message)
-    return false
-  }
-})())
-
-for (const handler of collectProp(mount(header.component), 'onClick')) handler()
-check('sidebar toggle reaches the layout service', sidebarToggles.length === 1)
-check('reading-size stepper writes through the theme service', themeWrites.length >= 1)
-check('every written size stays in 12..17', themeWrites.length > 0 && themeWrites.every((px) => Number.isInteger(px) && px >= 12 && px <= 17))
-
-const page = findRegistration((r) => r.options.name === 'settings.section')
-check('settings page renders without throwing', (() => {
-  try {
-    return mount(page.component) !== null
-  } catch (error) {
-    console.error('   ', error.message)
-    return false
-  }
-})())
-
-// Re-seed this component's hook cells before asserting on interactive state. The
-// harness persists cells per component identity, so a later mount would otherwise
-// reuse the checked value a previous run flipped inside a switch — unlike React,
-// which re-reads it from props on every render.
-hookCells.delete(page.component)
-scopeTo({})
-
-const switches = collectProp(mount(page.component), 'onChange')
-check('settings page renders a switch per module', switches.length >= 4)
-
-// `native` used to sit between these two, and it went away with the file router:
-// "leave it to DSH" and "do nothing" were the same thing once the product took
-// over previewing. Read this before the switch below turns the first module off:
-// a disabled module renders no body, by design.
-const optionValues = collectValue(mount(page.component), 'value')
-check(
-  'settings page offers every file-open target',
-  ['vscode', 'off'].every((target) => optionValues.includes(target)) && !optionValues.includes('native'),
-)
-check(
-  'every offered target has a label in the dictionary',
-  ['右侧 VS Code（按需启动）', '只让 DSH 自己处理'].every((label) => collectText(mount(page.component)).includes(label)),
-)
-
-for (const handler of switches.slice(0, 1)) handler({ target: { checked: false } })
-check(
-  'a switch writes a modules section through the store',
-  scopeWrites.some((w) => w.field === 'modules' && typeof w.value === 'object' && w.value !== null && w.value.vscode === false),
-)
-
-// Asking about code-server: the single probe a fresh install gets, and the fallback
-// that keeps file writes from pointing at a service that is not there.
-console.log('\ncode-server choice')
-
-scopeTo({ codeServer: 'have' })
-const controlsWithService = collectProp(mount(page.component), 'onClick').length
-scopeTo({ codeServer: 'none' })
-const controlsWithoutService = collectProp(mount(page.component), 'onClick').length
-
-check(
-  'the settings page states what it knows about code-server',
-  collectValue(mount(page.component), 'data-booster-code-server').includes('none'),
-)
-check('a machine without code-server gets more controls, not fewer', controlsWithoutService > controlsWithService)
-
-const asked = []
-const answer = await client.resolveCodeServer({
-  settings: { fileOpen: 'vscode', codeServer: 'unknown', startRequest: 0 },
-  set: (value) => asked.push(value),
-  probe: async () => false,
-})
-check('a fresh install without the service is answered, not guessed', answer === 'none' && asked[0]?.codeServer === 'none')
-check('the probe never rewrites the target the user chose', asked[0]?.fileOpen === 'vscode')
-
-const kept = []
-const found = await client.resolveCodeServer({
-  settings: { fileOpen: 'vscode', codeServer: 'unknown', startRequest: 0 },
-  set: (value) => kept.push(value),
-  probe: async () => true,
-})
-check('a machine that has the service keeps opening files in it', found === 'have' && kept[0]?.fileOpen === 'vscode')
-
-const explicit = []
-await client.resolveCodeServer({
-  settings: { fileOpen: 'off', codeServer: 'unknown', startRequest: 0 },
-  set: (value) => explicit.push(value),
-  probe: async () => false,
-})
-check('an explicit target survives an absent service too', explicit[0]?.fileOpen === 'off')
-
-// ------------------------------------------------------------ vscode module
-
-console.log('\nvscode module')
-
-// The settings-page block above flipped the first module switch off; restore the
-// full configuration so this block exercises a live module.
-scopeTo({})
-
-const vscodeBody = liveRegistration((r) => r.options.key === VSCODE_TYPE?.id)
-check('VS Code tab body is mounted in the tab seat', vscodeBody?.options.name === 'sidebar.right.pane.tab')
-
-const vscodeFrames = collectValue(mount(vscodeBody.component, {}), 'src')
-check('the VS Code tab frames the service address', vscodeFrames.includes('http://127.0.0.1:8443/'))
-check('the VS Code tab address carries no folder parameter', !vscodeFrames.some((src) => String(src).includes('folder=')))
-
-// The settings page's button is the second way in, and it must reach the Sidebar's
-// open-by-kind entry point rather than hope a reply mentions a URL.
-const openCallsBefore = openTabCalls.length
-scopeTo({})
-for (const handler of collectProp(mount(page.component), 'onClick')) handler()
-check('the settings entry opens the VS Code tab by kind', openTabCalls.length > openCallsBefore && openTabCalls.at(-1)?.kind === 'booster-vscode')
-
-// The workbench entry point is also reachable on its own, resolving the Sidebar
-// service the way the module does.
-const directTabs = []
-client.openVSCodeTab({ get: (name) => (name === 'sidebarRight' ? { openTab: (kind) => directTabs.push(kind) } : undefined) })
-check('the entry point opens the VS Code tab by kind', directTabs[0] === 'booster-vscode')
-
-// The VS Code tab asks the host to start the service. Asking is a settings write, and
-// every write re-applies this module, so it must happen once per page load — otherwise
-// the tab would ask, re-apply, ask again, forever.
-scopeTo({ codeServer: 'none' })
-const askingTab = liveRegistration((r) => r.options.key === VSCODE_TYPE?.id)
-const asksMade = () => scopeWrites.filter((w) => w.field === 'vscode' && w.value?.startRequest > 0).length
-const asksBefore = asksMade()
-mount(askingTab.component, {})
-await waitFor(() => asksMade() > asksBefore, 2000)
-check('the VS Code tab asks the host to start the service', asksMade() > asksBefore)
-const writesAfterAsk = scopeWrites.length
-mount(askingTab.component, {})
-await new Promise((resolve) => setTimeout(resolve, 150))
-check('and it asks only once per page load', scopeWrites.length === writesAfterAsk)
-
-// The module must be disposable through its enable switch, without taking the
-// other modules with it.
-const disposedBefore = disposedSlots.length
-scopeValue = { modules: { vscode: false, appearance: true, headerTools: true } }
-for (const listener of [...scopeListeners]) listener()
-check('disabling the module disposes its tab body and tab type', disposedSlots.length > disposedBefore)
-check('and the other modules stay live', liveNames().includes('conversation.session.header.utilities'))
-
-scopeValue = {
-  modules: { vscode: true, appearance: true, headerTools: true },
-  appearance: { accent: 'ocean', fontFamily: 'default' },
-}
-for (const listener of [...scopeListeners]) listener()
-check('selecting an accent stacks one override layer', accentLayers.length === 1)
-check('accent layer carries light+dark brand tokens', (() => {
-  const brand = accentLayers[0]?.tokens?.['--dsw-alias-brand-primary']
-  return typeof brand?.light === 'string' && typeof brand?.dark === 'string'
-})())
-check('re-enabling the module registers the tab type again', tabsRegistered.length >= 2)
-
-// ------------------------------------------- service-acquisition regression
-console.log('\nservice acquisition')
+/**
+ * Every service the live DSH 0.1.7 client catalog lists. A client entry may only *declare*
+ * a hard dependency taken from here — anything else can leave the entry pending forever,
+ * which stops the whole app from booting.
+ */
+const CLIENT_CATALOG = new Set([
+  'layout',
+  'locale',
+  'sessions',
+  'slots',
+  'theme',
+  'timer',
+  'uiWorkspace',
+  'workspaces',
+  'remote',
+  'configForms',
+  'sidebarRightTabs',
+  'commandUi',
+  'shortcuts',
+])
 
 /**
- * Build a mock client context whose service surface is configurable, so the
- * acquisition paths can be exercised independently of the happy path above.
+ * Evaluate the built client bundle in a fresh sandbox.
  *
- * This exists because of a real failure: `sidebarRightTabs` is published from the
- * same boot batch as this bundle, and the graph only orders a consumer after its
- * declared providers -- this package declares none, so a plain `ctx.get` can
- * legitimately return `undefined` at apply time even though the service appears
- * moments later.
+ * Fresh per scenario on purpose: the bundle keeps module-level state (the once-per-page-load
+ * probe and the once-per-page-load start request), and a scenario must not inherit it.
  *
- * @param {{ syncTabs?: boolean, hasInject?: boolean, injectProvides?: boolean }} options
- * @returns {{ ctx: object, records: object }}
+ * @returns {{ id: unknown, module: object, logs: string[] }} the loader id, the module
+ *   exports, and anything the bundle logged.
  */
-function acquisitionScenario(options) {
-  const records = { slots: [], tabs: [], injected: [] }
-  const tabsFace = {
-    register: (definition) => {
-      records.tabs.push(definition)
-      return () => {}
+function loadClient() {
+  let registration
+  const logs = []
+  const sandbox = {
+    console: {
+      error: (...args) => logs.push(args.map(String).join(' ')),
+      warn: (...args) => logs.push(args.map(String).join(' ')),
+      log: (...args) => logs.push(args.map(String).join(' ')),
     },
+    document: undefined,
+    // Nothing is listening on the loopback port in a smoke run.
+    fetch: () => Promise.reject(new Error('no service on this host')),
+    setTimeout: () => 0,
+    clearTimeout: () => {},
+    queueMicrotask,
   }
-  const readTabs = (name) => (name === 'sidebarRightTabs' && options.syncTabs === true ? tabsFace : undefined)
+  sandbox.window = { __ModuleLoader__: { load: (spec) => { registration = spec } } }
+  sandbox.globalThis = sandbox
+  vm.createContext(sandbox)
+  vm.runInContext(readFileSync(join(root, 'lib', 'client.js'), 'utf8'), sandbox, { filename: 'lib/client.js' })
+  const loaded = typeof registration?.factory === 'function' ? registration.factory(requireStub) : undefined
+  return { id: registration?.id, module: loaded, logs }
+}
+
+/**
+ * Build a stub client context that records what a plugin contributes.
+ * @param {object} [options] - `tabs` (false to leave the registry unpublished) and
+ *   `inject` (false to leave the context without a way to wait).
+ * @returns {object} the context and the record of everything it saw.
+ */
+function makeClientContext(options = {}) {
+  const withTabs = options.tabs !== false
+  const withInject = options.inject !== false
+  const records = {
+    tabTypes: [],
+    slotRegistrations: [],
+    slotInjects: [],
+    injected: [],
+    injectCallbacks: [],
+    effects: [],
+    configFormGets: [],
+    startRequests: [],
+  }
+
   const ctx = {
-    get: readTabs,
-    reflect: { get: () => undefined },
-    on: () => () => {},
-    effect: (callback) => callback(),
     slots: {
-      inject: (_key, callback) => callback(),
-      register: (registration) => {
-        records.slots.push(registration)
+      register(registration, component) {
+        records.slotRegistrations.push({ registration, component })
         return () => {}
       },
+      inject(key, callback) {
+        records.slotInjects.push(key)
+        return callback()
+      },
     },
-    settingsScope: {
-      bind: () => ({
-        getSnapshot: () => ({ value: undefined, revision: 1, writable: true, mode: 'host' }),
-        subscribe: () => () => {},
-        set: () => {},
-      }),
+    effect(callback, label) {
+      records.effects.push(label)
+      return callback()
     },
   }
-  if (options.hasInject !== false) {
+
+  if (withTabs) {
+    ctx.sidebarRightTabs = {
+      register(definition) {
+        records.tabTypes.push(definition)
+        return () => {}
+      },
+    }
+  }
+  if (withInject) {
     ctx.inject = (names, callback) => {
-      records.injected.push(...names)
-      if (options.injectProvides === true) {
-        // The injected context declares the name, so the service is readable now
-        // however the provider published it.
-        callback({ sidebarRightTabs: tabsFace, get: () => undefined, reflect: { get: () => undefined } })
-      }
+      records.injected.push(names)
+      records.injectCallbacks.push(callback)
       return () => {}
     }
   }
   return { ctx, records }
 }
 
-const late = acquisitionScenario({ syncTabs: false, hasInject: true, injectProvides: true })
-client.apply(late.ctx)
-check('waits for sidebarRightTabs when it is not published yet', late.records.injected.includes('sidebarRightTabs') === true)
-check('registers the tab type once the service arrives', late.records.tabs.length === 1)
+banner('client half — what the entry declares (proven first, on purpose)')
+
+console.log('  A client entry that declares a service the live catalog cannot supply stays')
+console.log('  pending forever, and a pending entry stops DSH from booting. This is the exact')
+console.log('  regression that took the app down after 0.1.7 removed `settingsScope`.')
+
+const first = loadClient()
+const declaredInject = first.module?.inject
+const injectIsExact =
+  Array.isArray(declaredInject) && declaredInject.length === 1 && declaredInject[0] === 'slots'
+if (!injectIsExact) {
+  console.log(`  !! declared inject: ${JSON.stringify(declaredInject)}`)
+  console.log('  !! expected exactly ["slots"] — every other name must go through optional access.')
+}
+check("inject is exactly ['slots'], the one dependency the entry cannot work without", injectIsExact)
 check(
-  'registers the tab body once the service arrives',
-  late.records.slots.some((r) => r.name === 'sidebar.right.pane.tab' && r.key === 'dsh-booster/vscode'),
+  'every declared dependency exists in the live 0.1.7 client catalog',
+  Array.isArray(declaredInject) && declaredInject.every((name) => CLIENT_CATALOG.has(name)),
+)
+check('the bundle hands the loader a factory for id "dsh-booster"', first.id === 'dsh-booster')
+check(
+  'the module exports are exactly apply, inject and name',
+  first.module !== undefined && Object.keys(first.module).sort().join(',') === 'apply,inject,name',
+)
+runCleanups()
+
+banner('client half — the one contribution: the right Sidebar\'s VS Code tab')
+
+const tabbed = makeClientContext()
+const tabbedClient = loadClient()
+let tabbedError
+try {
+  tabbedClient.module.apply(tabbed.ctx)
+} catch (error) {
+  tabbedError = error
+}
+
+check('apply() runs without throwing', tabbedError === undefined)
+check('apply() swallowed nothing on the way: it logged no error', tabbedClient.logs.length === 0)
+check('registers exactly one tab type', tabbed.records.tabTypes.length === 1)
+check('the tab type kind is "booster-vscode"', tabbed.records.tabTypes[0]?.kind === 'booster-vscode')
+check('the tab type id is "dsh-booster/vscode"', tabbed.records.tabTypes[0]?.id === 'dsh-booster/vscode')
+check('the tab type claims the extension band', tabbed.records.tabTypes[0]?.priority === 'extension')
+check(
+  'the tab type localises its title lazily',
+  typeof tabbed.records.tabTypes[0]?.title === 'function' && tabbed.records.tabTypes[0].title() === 'VS Code',
+)
+check('registers exactly one slot body', tabbed.records.slotRegistrations.length === 1)
+check(
+  'the body lands in the sidebar.right.pane.tab slot under the tab type id',
+  same(tabbed.records.slotInjects, ['sidebar.right.pane.tab']) &&
+    tabbed.records.slotRegistrations[0]?.registration?.name === 'sidebar.right.pane.tab' &&
+    tabbed.records.slotRegistrations[0]?.registration?.key === 'dsh-booster/vscode',
+)
+check('the slot body is a component', typeof tabbed.records.slotRegistrations[0]?.component === 'function')
+runCleanups()
+
+banner('client half — a composition without the tab registry must not throw')
+
+const waiting = makeClientContext({ tabs: false })
+let waitingError
+try {
+  loadClient().module.apply(waiting.ctx)
+} catch (error) {
+  waitingError = error
+}
+check('apply() survives a missing sidebarRightTabs registry', waitingError === undefined)
+check(
+  'it waits for the service through ctx.inject(["sidebarRightTabs"], …)',
+  same(waiting.records.injected, [['sidebarRightTabs']]),
+)
+check('it contributes nothing until the service arrives', waiting.records.tabTypes.length === 0)
+
+const lateTabs = []
+waiting.records.injectCallbacks[0]?.({ sidebarRightTabs: { register: (definition) => lateTabs.push(definition) } })
+check('and it registers the tab type as soon as the service is published', lateTabs.length === 1)
+check('the late tab type is the same one', lateTabs[0]?.kind === 'booster-vscode' && lateTabs[0]?.id === 'dsh-booster/vscode')
+runCleanups()
+
+banner('client half — the panel renders its empty state')
+
+// No config-face checks here on purpose: the "ask the host to start it" path was removed,
+// because the host event that would carry the request (`settings/updated`) does not exist
+// in 0.1.7's event catalog. The panel no longer touches `configForms` at all.
+const plain = makeClientContext()
+const plainClient = loadClient()
+plainClient.module.apply(plain.ctx)
+const plainBody = plain.records.slotRegistrations[0]?.component
+const plainText = collectText(await mountTwice(plainBody))
+check('the tab body renders its empty state', plainText.length > 0)
+check('and it says on screen that the service is not running', plainText.includes('服务没在运行'))
+check('the empty state offers the commands', plainText.includes('查看命令'))
+runCleanups()
+
+// ---------------------------------------------------------------- host half
+
+banner('host half — the durable configuration')
+
+const host = await import(new URL('../lib/index.js', import.meta.url).href)
+check('exports name "dsh-booster"', host.name === 'dsh-booster')
+check('exports apply()', typeof host.apply === 'function')
+check('exports Config, the schema the plugin manager renders', typeof host.Config === 'function')
+
+const source = await import(new URL('../src/config.ts', import.meta.url).href)
+const resolved = host.Config({})
+check(
+  'an empty config resolves every default',
+  resolved?.fileOpen === 'vscode' &&
+    resolved?.chime === true &&
+    resolved?.chimeMinSeconds === 3 &&
+    resolved?.chimeOnError === true,
+)
+check('the resolved defaults are the source of truth', same(resolved, source.DEFAULT_CONFIG))
+
+const normalize = typeof source.normalizeConfig === 'function' ? source.normalizeConfig : () => undefined
+check('normalizeConfig coerces an unknown file-open target to "vscode"', normalize({ fileOpen: 'nope' })?.fileOpen === 'vscode')
+check('normalizeConfig keeps "off"', normalize({ fileOpen: 'off' })?.fileOpen === 'off')
+check(
+  'normalizeConfig falls back when the minimum turn length is not one of the offered values',
+  normalize({ chimeMinSeconds: 7 })?.chimeMinSeconds === 3 && normalize({ chimeMinSeconds: 10 })?.chimeMinSeconds === 10,
+)
+check('normalizeConfig keeps chime:false switched off', normalize({ chime: false })?.chime === false)
+check('normalizeConfig keeps chimeOnError:false switched off', normalize({ chimeOnError: false })?.chimeOnError === false)
+check(
+  'normalizeConfig treats junk input as an empty config',
+  same(normalize(undefined), source.DEFAULT_CONFIG) && same(normalize('not an object'), source.DEFAULT_CONFIG),
 )
 
-const unreachable = acquisitionScenario({ syncTabs: false, hasInject: false })
-client.apply(unreachable.ctx)
-check(
-  'reports an inspectable reason when the service is unreachable',
-  unreachable.records.slots.some((r) => String(r.id).startsWith('dsh-booster-diag-')),
-)
-check('contributes nothing else when the service is unreachable', unreachable.records.tabs.length === 0)
+banner('host half — the file-open bridge')
 
-const immediate = acquisitionScenario({ syncTabs: true })
-client.apply(immediate.ctx)
-check('still starts synchronously when the service is already up', immediate.records.tabs.length === 1)
-check('does not wait when the synchronous read succeeds', immediate.records.injected.includes('sidebarRightTabs') === false)
+// LOCALAPPDATA is both the bridge root and the root code-server is looked for under, so
+// pointing it at a scratch directory keeps the marker inside the temp directory *and*
+// makes ensureService() find no launcher: a smoke run must never start a real service.
+const bridgeRoot = mkdtempSync(join(tmpdir(), 'dsh-booster-smoke-'))
+const savedLocalAppData = process.env.LOCALAPPDATA
+process.env.LOCALAPPDATA = bridgeRoot
+const marker = join(bridgeRoot, 'code-server', 'bridge', 'open-request.json')
+const temporary = `${marker}.tmp`
+const readMarker = () => JSON.parse(readFileSync(marker, 'utf8'))
+
+/**
+ * Build a stub host context that records the events the plugin subscribed to.
+ * @returns {{ ctx: object, fire: (event: string, ...args: unknown[]) => void, events: Set<string> }}
+ *   the context, a way to fire an event, and the set of subscribed event names.
+ */
+function makeHostContext() {
+  const listeners = new Map()
+  const events = new Set()
+  return {
+    events,
+    ctx: {
+      get: () => undefined,
+      on(event, listener) {
+        events.add(event)
+        const list = listeners.get(event) ?? []
+        list.push(listener)
+        listeners.set(event, list)
+        return () => {}
+      },
+    },
+    fire(event, ...args) {
+      for (const listener of listeners.get(event) ?? []) listener(...args)
+    },
+  }
+}
+
+const bridge = makeHostContext()
+host.apply(bridge.ctx, { fileOpen: 'vscode' })
+
+check('the host subscribes to settled tool results', bridge.events.has('tools/result'))
+check('the host subscribes to a turn ending and to a failure', bridge.events.has('agent/status') && bridge.events.has('agent/error'))
+
+bridge.fire('tools/result', { name: 'write', arguments: { file_path: 'C:/work/a.ts' } }, { isError: false })
+check('a settled write drops a bridge request naming that file', await waitFor(() => existsSync(marker) && readMarker().path === 'C:/work/a.ts'))
+check('the request is stamped for ordering', typeof readMarker().at === 'number')
+check('the marker is written atomically, with no temp file left behind', !existsSync(temporary))
+
+rmSync(marker, { force: true })
+bridge.fire('tools/result', { name: 'write', arguments: { file_path: 'C:/work/a.ts' } }, { isError: true })
+await delay(250)
+check('an errored result drops no request', !existsSync(marker))
+
+bridge.fire('tools/result', { name: 'bash', arguments: { file_path: 'C:/work/b.ts' } }, { isError: false })
+await delay(250)
+check('a tool that does not name a file drops no request', !existsSync(marker))
+
+bridge.fire('tools/result', { name: 'edit', arguments: { file_path: 'C:/work/c.ts' } }, { isError: false })
+check('a settled edit drops one too', await waitFor(() => existsSync(marker) && readMarker().path === 'C:/work/c.ts'))
+
+const offBridge = makeHostContext()
+host.apply(offBridge.ctx, { fileOpen: 'off' })
+rmSync(marker, { force: true })
+offBridge.fire('tools/result', { name: 'write', arguments: { file_path: 'C:/work/d.ts' } }, { isError: false })
+await delay(250)
+check('fileOpen "off" leaves the bridge silent', !existsSync(marker))
+
+const junkBridge = makeHostContext()
+host.apply(junkBridge.ctx, { fileOpen: 'nonsense' })
+junkBridge.fire('tools/result', { name: 'write', arguments: { file_path: 'C:/work/e.ts' } }, { isError: false })
+check(
+  'a junk file-open target is coerced to "vscode" at runtime, not trusted',
+  await waitFor(() => existsSync(marker) && readMarker().path === 'C:/work/e.ts'),
+)
+
+process.env.LOCALAPPDATA = savedLocalAppData
+rmSync(bridgeRoot, { recursive: true, force: true })
+
+banner('chime — a real WAV, rendered deterministically')
+
+const done = host.renderChime('done')
+const error = host.renderChime('error')
+check('the chime is a RIFF/WAVE file', done.subarray(0, 4).toString('latin1') === 'RIFF' && done.subarray(8, 12).toString('latin1') === 'WAVE')
+check(
+  'it is mono 16-bit PCM at 44.1 kHz',
+  done.readUInt16LE(20) === 1 &&
+    done.readUInt16LE(22) === 1 &&
+    done.readUInt32LE(24) === 44100 &&
+    done.readUInt16LE(34) === 16 &&
+    done.subarray(36, 40).toString('latin1') === 'data',
+)
+check(
+  'its declared lengths match its bytes',
+  done.readUInt32LE(4) === done.length - 8 && done.readUInt32LE(40) === done.length - 44,
+)
+check('rendering is deterministic', host.renderChime('done').equals(done))
+check('the falling chime is its own sound', !done.equals(error) && error.readUInt32LE(40) === error.length - 44)
+check(
+  'the cache path lives under the OS temp directory',
+  host.chimeCachePath('done').startsWith(tmpdir() + sep),
+)
+check('the cache path is versioned, so a stale render is never reused', /dsh-booster-chime-v\d+-done\.wav$/.test(host.chimeCachePath('done')))
+check('a short turn stays silent', host.shouldChime({ enabled: true, elapsedMs: 1200, minSeconds: 3, erroredAgoMs: Infinity }) === false)
+check('a switched-off chime never fires', host.shouldChime({ enabled: false, elapsedMs: 60000, minSeconds: 0, erroredAgoMs: Infinity }) === false)
+check(
+  'a turn that just failed does not chime again on its way out',
+  host.shouldChime({ enabled: true, elapsedMs: 9000, minSeconds: 3, erroredAgoMs: 800 }) === false,
+)
+check('a long clean turn chimes', host.shouldChime({ enabled: true, elapsedMs: 9000, minSeconds: 3, erroredAgoMs: Infinity }) === true)
 
 // ------------------------------------------------------------------ verdict
 
-console.log('')
-if (failures.length > 0) {
-  // Listed at the end as well as at the point of failure: the tail of a CI log is the
-  // part anyone actually reads, and "1 check(s) failed" on its own answers nothing.
-  console.log(`smoke: ${failures.length} check(s) failed:`)
+banner('verdict')
+const total = passed + failures.length
+if (failures.length === 0) {
+  console.log(`\nall ${total} checks passed`)
+} else {
+  console.log(`\n${failures.length} of ${total} checks FAILED:`)
   for (const label of failures) console.log(`  - ${label}`)
-  process.exit(1)
 }
-console.log('smoke: all checks passed')
+process.exitCode = failures.length === 0 ? 0 : 1

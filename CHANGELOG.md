@@ -5,6 +5,50 @@ All notable changes to `dsh-booster` are recorded here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0-beta.2] - 2026-09-28
+
+### Fixed
+
+- **A startup failure on DSH 0.1.7.** The client half declared
+  `inject = ['slots', 'settingsScope']` — the 0.1.5-era settings service. 0.1.7 removed it
+  (the name appears **0 times** across the 12 shipped client packages), so the client entry
+  never activated, and DSH treats a pending entry as a boot failure:
+
+  ```
+  web boot: 1 entry did not activate
+  dsh-booster: pending (waiting for service: settingsScope)
+  ```
+
+  The app refused to start until the plugin was removed. `inject` is now exactly
+  `['slots']`, and the smoke suite's first assertion keeps it that way — every name in that
+  array has to exist in the live client service catalog, or the suite fails.
+
+### Changed
+
+- **Plugin configuration follows 0.1.7's model.** The host entry declares `Config`
+  (schemastery) and the product's plugin manager renders the form; the client half reads
+  live values through `configForms` when it is present. The plugin's own settings page,
+  module manager, settings store, appearance module and header-tools module are **gone** —
+  the product owns all of that now.
+- Client bundle **52.2 KB → 15.2 KB**; sources 20 files → 8.
+- `appearance` (accent colour, interface font) and `headerTools` (sidebar toggle, font
+  stepper) were **removed**: 0.1.7's own Appearance settings and keyboard shortcuts cover
+  them, so a second entry point was exactly the bloat this plugin is meant to avoid.
+- The "the tab asks the host to start the service" path was **removed**: it wrote a
+  `startRequest` value that only the host event `settings/updated` could carry, and 0.1.7's
+  event catalog has no such event (`no catalogued Event named "settings/updated"`). The tab
+  now says plainly that a file write starts the service, and hands over the manual command.
+
+- The chime is **on by default** now: it is the point of the feature, and its switch lives
+  in the plugin manager's form rather than behind a page nobody opens.
+
+### Notes
+
+- **`0.3.0-beta.1` is broken on DSH 0.1.7 — do not install it.** Use `0.3.0-beta.2`.
+- Installing on the Windows desktop app is documented as profile wiring (`dependencies` +
+  `dsh.profile.bundles` + a junction), because the CLI refuses to manage that profile:
+  `error: profile "desktop" is managed exclusively by the Electron application`.
+
 ## [0.3.0-beta.1] - 2026-09-28
 
 这一版是**减法**。DSH 0.1.6 把插件的两块功能收进了产品本身，于是它们从插件里删掉了 —— 留着只会变成两套机制抢同一个侧栏。
