@@ -37,6 +37,7 @@ const SERVICE_HOME = `http://127.0.0.1:${SERVICE_PORT}/`
 export const DICT = {
   zh: {
     tab: 'VS Code',
+    'guide.desc': '本机 code-server 里那个真的 VS Code，按需启动',
     note: '这是插件按需拉起的真 VS Code（code-server）。空白的话：服务还没起来 —— 写一个文件它就会自己启动，或者用下面那条命令手动起。',
     fullscreen: '全屏',
     label: '右侧 VS Code（code-server）',
@@ -53,6 +54,7 @@ export const DICT = {
   en: {
     tab: 'VS Code',
     note: 'The real VS Code (code-server) that this plugin starts on demand. Blank pane? The service is not up — writing a file starts it, or use the command below.',
+    'guide.desc': 'The real VS Code in code-server, started on demand',
     fullscreen: 'Fullscreen',
     label: 'VS Code in the right Sidebar (code-server)',
     'state.unknown': 'Checking…',

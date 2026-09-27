@@ -130,9 +130,23 @@ export function apply(ctx: ClientContext): void {
           tabs.register({
             id: VSCODE_TYPE_ID,
             kind: VSCODE_KIND,
-            // A third-party type; the band only matters for resource claiming.
+            // `extension` is the band for a type from outside the product, and the
+            // documented default; it also lets this type take over a builtin kind.
             priority: 'extension',
             title: () => t('tab'),
+            // Without this the type exists but is **invisible**: the right Sidebar's
+            // user-facing surface is its guide page, and a type appears there only by
+            // contributing an entry capsule. Registering `guide` is what puts "VS Code"
+            // in front of the user — a bare type can only be opened programmatically,
+            // which is exactly how the previous version lost its only way in.
+            guide: [
+              {
+                id: 'vscode',
+                order: 10,
+                title: () => t('tab'),
+                description: () => t('guide.desc'),
+              },
+            ],
           }),
         'dsh-booster: VS Code tab type',
       )

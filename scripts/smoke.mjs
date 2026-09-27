@@ -416,6 +416,19 @@ check(
   'the tab type localises its title lazily',
   typeof tabbed.records.tabTypes[0]?.title === 'function' && tabbed.records.tabTypes[0].title() === 'VS Code',
 )
+// The right Sidebar's user-facing surface is its guide page, and a type appears there
+// only by contributing an entry capsule. Without `guide` the type registers fine and is
+// invisible to the user — which is exactly how a rework once removed the only way to
+// open the workbench. This is the regression guard for that.
+const guide = tabbed.records.tabTypes[0]?.guide
+check('the tab type contributes a guide entry, so a user can actually open it', Array.isArray(guide) && guide.length >= 1)
+check(
+  'the guide entry has the identity the guide page needs',
+  typeof guide?.[0]?.id === 'string' &&
+    typeof guide[0].order === 'number' &&
+    typeof guide[0].title === 'function' &&
+    guide[0].title() === 'VS Code',
+)
 check('registers exactly one slot body', tabbed.records.slotRegistrations.length === 1)
 check(
   'the body lands in the sidebar.right.pane.tab slot under the tab type id',
