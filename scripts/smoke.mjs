@@ -3,9 +3,10 @@
  *
  * It runs the real build output against stub services, so it verifies behaviour
  * rather than shape: the host registers the namespace and its schema resolves
- * defaults, the client applies its modules, the module manager really tears
- * contributions down when a switch flips, and the preview watcher turns a
- * running write/edit call into a paged review tab. No GUI restart, no browser.
+ * defaults, a settled file edit reaches the bridge only when the user asked for
+ * VS Code, the module manager really tears contributions down when a switch
+ * flips, and the VS Code tab is a tab type of its own whose frame address carries
+ * no `?folder=`. No GUI restart, no browser.
  *
  * Run with: node scripts/smoke.mjs
  */
@@ -74,10 +75,15 @@ check('namespace is "booster"', registrations[0]?.ns === 'booster')
 const resolved = registrations[0]?.schema({})
 check(
   'schema resolves module defaults',
-  resolved?.modules?.appearance === true && resolved?.modules?.headerTools === true && resolved?.modules?.preview === true,
+  resolved?.modules?.vscode === true && resolved?.modules?.appearance === true && resolved?.modules?.headerTools === true,
 )
 check('schema resolves appearance defaults', resolved?.appearance?.accent === 'default' && resolved?.appearance?.fontFamily === 'default')
 check('schema resolves header-tools defaults', resolved?.headerTools?.sidebarToggle === true && resolved?.headerTools?.readingSize === true)
+check(
+  'schema resolves the vscode section defaults',
+  resolved?.vscode?.fileOpen === 'vscode' && resolved?.vscode?.codeServer === 'unknown' && resolved?.vscode?.startRequest === 0,
+)
+check('schema resolves the chime defaults', resolved?.chime?.minSeconds === 3 && resolved?.chime?.onError === true)
 
 // ------------------------------------------------------------- host bridge
 
@@ -94,7 +100,9 @@ const savedLocalAppData = process.env.LOCALAPPDATA
 process.env.LOCALAPPDATA = bridgeRoot
 const marker = nodePath.join(bridgeRoot, 'code-server', 'bridge', 'open-request.json')
 
-const config = { preview: { linkMode: 'all', fileOpen: 'vscode' } }
+// A fresh install with no stored section at all: the normalizer fills in
+// `fileOpen: 'vscode'`, which is the target the bridge serves.
+const config = { vscode: { fileOpen: 'vscode' } }
 let settle
 let settingsUpdated
 let statusListener
@@ -170,10 +178,15 @@ check('a non-file tool drops no request', readMarker().path === 'C:/work/a.ts')
 await writeAndSettle('edit', { file_path: 'C:/work/c.ts' })
 check('a settled edit does drop one', await waitFor(() => readMarker().path === 'C:/work/c.ts'))
 
-// With the built-in preview owning file opening, the bridge stays silent.
-config.preview.fileOpen = 'preview'
-await writeAndSettle('write', { file_path: 'C:/work/d.ts' })
-check('the preview target leaves the bridge silent', readMarker().path === 'C:/work/c.ts')
+// Only `vscode` routes a file anywhere now, and the `off` target has to leave the
+// bridge alone: it is the user saying "do not open anything".
+config.vscode.fileOpen = 'off'
+await writeAndSettle('write', { file_path: 'C:/work/e.ts' })
+check('the off target leaves the bridge silent', readMarker().path === 'C:/work/c.ts')
+
+config.vscode.fileOpen = 'vscode'
+await writeAndSettle('write', { file_path: 'C:/work/f.ts' })
+check('choosing VS Code again drops the next request', await waitFor(() => readMarker().path === 'C:/work/f.ts'))
 
 process.env.LOCALAPPDATA = savedLocalAppData
 nodeFs.rmSync(bridgeRoot, { recursive: true, force: true })
@@ -271,12 +284,12 @@ if (process.platform === 'win32') {
 }
 
 // A browser page cannot start a program, so the VS Code tab bumps
-// `preview.startRequest` and the host answers in `preview.codeServer`. A throwaway
+// `vscode.startRequest` and the host answers in `vscode.codeServer`. A throwaway
 // listener on the port makes that answer deterministic; LOCALAPPDATA stays pointed at
 // the fake install so that even a real spawn attempt can only run the fake launcher.
 check('the host listens for a start request', typeof settingsUpdated === 'function')
 process.env.LOCALAPPDATA = fakeRoot
-config.preview.fileOpen = 'vscode'
+config.vscode.fileOpen = 'vscode'
 answerWrites.length = 0
 const fakeService = nodeNet.createServer()
 try {
@@ -288,11 +301,12 @@ try {
   // The port is already owned (a real code-server is running); the host reads that as
   // "up" as well, so the expectation does not change.
 }
-settingsUpdated('booster', { preview: { fileOpen: 'vscode', startRequest: Date.now() + 1 } })
+settingsUpdated('booster', { vscode: { fileOpen: 'vscode', startRequest: Date.now() + 1 } })
 await waitFor(() => answerWrites.length > 0, 9000)
-const startAnswer = answerWrites.at(-1)?.section?.preview
+const startAnswer = answerWrites.at(-1)?.section?.vscode
 check('a start request is answered where the browser can see it', startAnswer?.codeServer === 'have')
 check('and the request is cleared so the tab stops waiting', startAnswer?.startRequest === 0)
+check('and the rest of the section survives the answer', startAnswer?.fileOpen === 'vscode')
 await new Promise((resolve) => fakeService.close(resolve))
 process.env.LOCALAPPDATA = savedLocalAppData
 
@@ -452,6 +466,30 @@ function collectText(node) {
   return text
 }
 
+/**
+ * Collect any prop value (not only functions) from an expanded element tree.
+ * @param {unknown} node - the expanded tree.
+ * @param {string} key - the prop name to collect.
+ * @returns {unknown[]} every value found for that prop.
+ */
+function collectValue(node, key) {
+  const found = []
+  const walk = (current) => {
+    if (current === null || typeof current !== 'object') return
+    if (Array.isArray(current)) {
+      for (const child of current) walk(child)
+      return
+    }
+    if (current.props !== undefined && current.props !== null) {
+      if (current.props[key] !== undefined) found.push(current.props[key])
+      walk(current.props.children)
+    }
+    if (current.children !== undefined) walk(current.children)
+  }
+  walk(node)
+  return found
+}
+
 // -------------------------------------------------------------- client half
 
 console.log('\nclient half')
@@ -473,6 +511,12 @@ check('bundle registers a ModuleLoader factory', typeof factory === 'function')
 const client = factory(requireStub)
 check('exports apply()', typeof client.apply === 'function')
 check('injects slots + settingsScope', Array.isArray(client.inject) && client.inject.includes('slots') && client.inject.includes('settingsScope'))
+// The workbench entry point and the probe are re-exported from the bundle that
+// actually ships, so they can be exercised without the page.
+check(
+  're-exports the workbench entry point and the code-server probe',
+  typeof client.openVSCodeTab === 'function' && typeof client.resolveCodeServer === 'function',
+)
 
 const slotRegistrations = []
 const disposedSlots = []
@@ -482,7 +526,6 @@ const sidebarToggles = []
 const scopeWrites = []
 const tabsRegistered = []
 const openTabCalls = []
-const openedResources = []
 const scopeListeners = new Set()
 let scopeValue
 
@@ -515,9 +558,9 @@ const optionalServices = {
 }
 
 // The right Sidebar publishes these through `ctx.reflect.provide`, not as
-// Cordis services, so the module resolves them through the reflect face.
+// Cordis services, so the module resolves them through the reflect face. Only a
+// tab-type registry and the open-by-kind entry point remain.
 const reflectServices = {
-
   sidebarRightTabs: {
     register: (definition) => {
       tabsRegistered.push(definition)
@@ -526,7 +569,6 @@ const reflectServices = {
   },
   sidebarRight: {
     openTab: (kind, options) => openTabCalls.push({ kind, options }),
-    openResource: (address) => openedResources.push(address),
   },
 }
 
@@ -549,31 +591,34 @@ const ctx = {
   settingsScope: { bind: () => scope },
 }
 
-// These tests exercise the built-in preview path, which the ileOpen switch
-// only selects when it is not scode.
-scopeValue = { preview: { linkMode: 'all', fileOpen: 'preview', codeServer: 'have' } }
+// The VS Code tab only frames the workbench when the service is known to answer,
+// so this start point is the one where the frame is on screen.
+scopeValue = {
+  modules: { vscode: true, appearance: true, headerTools: true },
+  vscode: { fileOpen: 'vscode', codeServer: 'have', startRequest: 0 },
+}
 client.apply(ctx)
 
 const liveNames = () => slotRegistrations.filter((r) => !r.disposed).map((r) => r.options.name)
 const findRegistration = (predicate) => slotRegistrations.find(predicate)
+const liveRegistration = (predicate) => slotRegistrations.filter(predicate).at(-1)
+const scopeTo = (vscode) => {
+  scopeValue = {
+    modules: { vscode: true, appearance: true, headerTools: true },
+    vscode: { fileOpen: 'vscode', codeServer: 'have', startRequest: 0, ...vscode },
+  }
+  for (const listener of [...scopeListeners]) listener()
+}
 
 check('registers the settings page', liveNames().includes('settings.section'))
 check('applies every default module', liveNames().includes('conversation.session.header.utilities'))
 check('no accent layer for the default accent', accentLayers.length === 0)
-check('registers one right-Sidebar tab type per panel', tabsRegistered.length === 2)
-check('tab type is a page type with a fresh kind', tabsRegistered[0]?.kind === 'booster-preview-web')
+check('registers the tab type the workbench needs', tabsRegistered.length === 1)
+check('tab type is the plugin-owned VS Code page type', tabsRegistered[0]?.kind === 'booster-vscode')
 check('tab type declares an extension-band priority', tabsRegistered[0]?.priority === 'extension')
 check('tab type title is localized lazily', typeof tabsRegistered[0]?.title === 'function')
 
-const PREVIEW_KIND = tabsRegistered[0]?.kind
-const PREVIEW_ID = tabsRegistered[0]?.id
-
-// The workbench has a tab type of its own. That is what replaced "hope a reply
-// mentions the URL", and the address it frames carries no `?folder=` on purpose:
-// code-server persists that parameter past the page it was opened from.
-const VSCODE_TYPE = tabsRegistered.find((r) => r.kind === 'booster-vscode')
-check('registers a tab type for the VS Code workbench', VSCODE_TYPE !== undefined)
-check('the VS Code tab title is localized lazily', typeof VSCODE_TYPE?.title === 'function')
+const VSCODE_TYPE = tabsRegistered[0]
 
 const header = findRegistration((r) => r.options.name === 'conversation.session.header.utilities')
 check('header component renders without throwing', (() => {
@@ -600,31 +645,43 @@ check('settings page renders without throwing', (() => {
   }
 })())
 
-const switches = collectProp(mount(page.component), 'onChange')
-check('settings page renders a switch per module', switches.length >= 3)
+// Re-seed this component's hook cells before asserting on interactive state. The
+// harness persists cells per component identity, so a later mount would otherwise
+// reuse the checked value a previous run flipped inside a switch — unlike React,
+// which re-reads it from props on every render.
+hookCells.delete(page.component)
+scopeTo({})
 
-// The three file-open behaviours and both link modes exist in the host half, so
-// the page has to keep offering all of them. Read this before the switch below
-// turns the first module off: a disabled module renders no body, by design.
+const switches = collectProp(mount(page.component), 'onChange')
+check('settings page renders a switch per module', switches.length >= 4)
+
+// `native` used to sit between these two, and it went away with the file router:
+// "leave it to DSH" and "do nothing" were the same thing once the product took
+// over previewing. Read this before the switch below turns the first module off:
+// a disabled module renders no body, by design.
 const optionValues = collectValue(mount(page.component), 'value')
-check('settings page offers every file-open target', ['vscode', 'preview', 'off'].every((target) => optionValues.includes(target)))
-check('settings page offers every link mode', ['all', 'video'].every((mode) => optionValues.includes(mode)))
+check(
+  'settings page offers every file-open target',
+  ['vscode', 'off'].every((target) => optionValues.includes(target)) && !optionValues.includes('native'),
+)
+check(
+  'every offered target has a label in the dictionary',
+  ['右侧 VS Code（按需启动）', '只让 DSH 自己处理'].every((label) => collectText(mount(page.component)).includes(label)),
+)
 
 for (const handler of switches.slice(0, 1)) handler({ target: { checked: false } })
-check('a switch writes a modules section through the store', scopeWrites.some((w) => w.field === 'modules' && typeof w.value === 'object' && w.value !== null))
+check(
+  'a switch writes a modules section through the store',
+  scopeWrites.some((w) => w.field === 'modules' && typeof w.value === 'object' && w.value !== null && w.value.vscode === false),
+)
 
 // Asking about code-server: the single probe a fresh install gets, and the fallback
 // that keeps file writes from pointing at a service that is not there.
 console.log('\ncode-server choice')
 
-const scopeTo = (preview) => {
-  scopeValue = { modules: { preview: true, appearance: true, headerTools: true }, preview: { linkMode: 'all', ...preview } }
-  for (const listener of [...scopeListeners]) listener()
-}
-
-scopeTo({ fileOpen: 'preview', codeServer: 'have' })
+scopeTo({ codeServer: 'have' })
 const controlsWithService = collectProp(mount(page.component), 'onClick').length
-scopeTo({ fileOpen: 'preview', codeServer: 'none' })
+scopeTo({ codeServer: 'none' })
 const controlsWithoutService = collectProp(mount(page.component), 'onClick').length
 
 check(
@@ -635,7 +692,7 @@ check('a machine without code-server gets more controls, not fewer', controlsWit
 
 const asked = []
 const answer = await client.resolveCodeServer({
-  settings: { linkMode: 'all', fileOpen: 'vscode', codeServer: 'unknown' },
+  settings: { fileOpen: 'vscode', codeServer: 'unknown', startRequest: 0 },
   set: (value) => asked.push(value),
   probe: async () => false,
 })
@@ -644,7 +701,7 @@ check('the probe never rewrites the target the user chose', asked[0]?.fileOpen =
 
 const kept = []
 const found = await client.resolveCodeServer({
-  settings: { linkMode: 'all', fileOpen: 'vscode', codeServer: 'unknown' },
+  settings: { fileOpen: 'vscode', codeServer: 'unknown', startRequest: 0 },
   set: (value) => kept.push(value),
   probe: async () => true,
 })
@@ -652,236 +709,46 @@ check('a machine that has the service keeps opening files in it', found === 'hav
 
 const explicit = []
 await client.resolveCodeServer({
-  settings: { linkMode: 'all', fileOpen: 'off', codeServer: 'unknown' },
+  settings: { fileOpen: 'off', codeServer: 'unknown', startRequest: 0 },
   set: (value) => explicit.push(value),
   probe: async () => false,
 })
 check('an explicit target survives an absent service too', explicit[0]?.fileOpen === 'off')
 
-// ----------------------------------------------------------- preview module
+// ------------------------------------------------------------ vscode module
 
-console.log('\npreview module')
-
-/**
- * Collect any prop value (not only functions) from an expanded element tree.
- * @param {unknown} node - the expanded tree.
- * @param {string} key - the prop name to collect.
- * @returns {unknown[]} every value found for that prop.
- */
-function collectValue(node, key) {
-  const found = []
-  const walk = (current) => {
-    if (current === null || typeof current !== 'object') return
-    if (Array.isArray(current)) {
-      for (const child of current) walk(child)
-      return
-    }
-    if (current.props !== undefined && current.props !== null) {
-      if (current.props[key] !== undefined) found.push(current.props[key])
-      walk(current.props.children)
-    }
-    if (current.children !== undefined) walk(current.children)
-  }
-  walk(node)
-  return found
-}
-
-/**
- * Collect the element type names present in an expanded tree.
- * @param {unknown} node - the expanded tree.
- * @returns {Set<string>} the type names.
- */
-function collectTypes(node) {
-  const types = new Set()
-  const walk = (current) => {
-    if (current === null || typeof current !== 'object') return
-    if (Array.isArray(current)) {
-      for (const child of current) walk(child)
-      return
-    }
-    if (typeof current.type === 'string') types.add(current.type)
-    if (current.props !== undefined && current.props !== null) walk(current.props.children)
-    if (current.children !== undefined) walk(current.children)
-  }
-  walk(node)
-  return types
-}
+console.log('\nvscode module')
 
 // The settings-page block above flipped the first module switch off; restore the
 // full configuration so this block exercises a live module.
-scopeValue = { modules: { preview: true, appearance: true, headerTools: true }, preview: { linkMode: 'all', fileOpen: 'preview', codeServer: 'have' } }
-for (const listener of [...scopeListeners]) listener()
-
-const liveRegistration = (predicate) => slotRegistrations.filter(predicate).at(-1)
-const watcher = liveRegistration((r) => r.options.id === 'dsh-booster-preview-watch')
-const panelBody = liveRegistration((r) => r.options.key === PREVIEW_ID)
-
-check('watcher is mounted in an additive session seat', watcher?.options.name === 'conversation.input.dock')
-check('web panel body is mounted in the tab seat', panelBody?.options.name === 'sidebar.right.pane.tab')
+scopeTo({})
 
 const vscodeBody = liveRegistration((r) => r.options.key === VSCODE_TYPE?.id)
 check('VS Code tab body is mounted in the tab seat', vscodeBody?.options.name === 'sidebar.right.pane.tab')
+
 const vscodeFrames = collectValue(mount(vscodeBody.component, {}), 'src')
 check('the VS Code tab frames the service address', vscodeFrames.includes('http://127.0.0.1:8443/'))
 check('the VS Code tab address carries no folder parameter', !vscodeFrames.some((src) => String(src).includes('folder=')))
 
-// The settings-page button and the watcher share one entry point; without it the
-// workbench was reachable only through a reply that happened to mention its URL.
-// `ctx.get` is the read the plugin's own service helper uses.
-const vscodeTabs = []
-const sidebarStub = { openTab: (kind) => vscodeTabs.push(kind), openResource: () => {} }
-client.openVSCodeTab({ get: (name) => (name === 'sidebarRight' ? sidebarStub : undefined) })
-check('the entry point opens the VS Code tab by kind', vscodeTabs[0] === 'booster-vscode')
+// The settings page's button is the second way in, and it must reach the Sidebar's
+// open-by-kind entry point rather than hope a reply mentions a URL.
+const openCallsBefore = openTabCalls.length
+scopeTo({})
+for (const handler of collectProp(mount(page.component), 'onClick')) handler()
+check('the settings entry opens the VS Code tab by kind', openTabCalls.length > openCallsBefore && openTabCalls.at(-1)?.kind === 'booster-vscode')
 
-/** One running write call. */
-const writeCall = (callId, path, content) => ({
-  callId,
-  name: 'write',
-  argsRaw: JSON.stringify({ file_path: path, content }),
-})
-/** One assistant reply carrying text that may contain links. */
-const replyWith = (seq, text) => ({ kind: 'assistant', seq, blocks: [{ kind: 'text', text }] })
-
-let chatValue = { legacy: { runningCalls: [], nodes: [] } }
-const useChatStub = (selector) => selector(chatValue)
-const renderWatcher = () => mount(watcher.component, { useChat: useChatStub, sessionId: 'sess-1' })
-const renderBody = () => mount(panelBody.component, { sessionId: 'sess-1' })
-
-// 1. Coding: the product's own preview is asked for the file, so this module
-//    never reimplements a code view.
-chatValue = { legacy: { runningCalls: [writeCall('c1', 'src/a.ts', 'const a = 1')], nodes: [] } }
-renderWatcher()
-check('writing a file opens the product preview for it', openedResources.length === 1)
-check('the switch selects the built-in preview rather than the bridge', scopeValue.preview.fileOpen === 'preview')
-check('the file address follows the session grammar', openedResources[0] === 'dsh-resource://file/session/sess-1/src/a.ts')
-check('writing a file does not open the web panel', openTabCalls.length === 0)
-
-renderWatcher()
-check('re-rendering the same call does not reopen the file', openedResources.length === 1)
-
-// A file is only complete once its call settles, so the preview is asked again.
-chatValue = { legacy: { runningCalls: [], nodes: [] } }
-renderWatcher()
-check('a settled call reopens the file so the preview can refresh', openedResources.length === 2)
-
-// A Windows absolute path keeps its drive segment as one encoded segment.
-chatValue = { legacy: { runningCalls: [writeCall('c2', 'C:\\work\\b.ts', 'x')], nodes: [] } }
-renderWatcher()
-check('an absolute path encodes each segment once', openedResources[2] === 'dsh-resource://file/session/sess-1/C%3A/work/b.ts')
-
-chatValue = { legacy: { runningCalls: [{ callId: 'c3', name: 'bash', argsRaw: '{"command":"ls"}' }], nodes: [] } }
-renderWatcher()
-// The settled `c2` is asked for again here, which is expected; what must not
-// happen is a third target appearing for the non-file tool.
-const distinctTargets = new Set(openedResources.map((address) => address.split('/').pop()))
-check(
-  'only files the session actually touched are ever previewed',
-  distinctTargets.size === 2 && distinctTargets.has('a.ts') && distinctTargets.has('b.ts'),
-)
-
-// 2. Links: the newest link in the agent's reply opens in the web panel.
-chatValue = { legacy: { runningCalls: [], nodes: [replyWith(1, 'see https://example.com/a then https://example.com/b')] } }
-renderWatcher()
-check('a link in a reply opens the web panel', openTabCalls.length === 1 && openTabCalls[0]?.kind === PREVIEW_KIND)
-check('the panel shows the newest link, not the first', collectValue(renderBody(), 'value').includes('https://example.com/b'))
-check('the panel frames the page', collectValue(renderBody(), 'src').includes('https://example.com/b'))
-check('the panel offers an outside-browser escape hatch', collectTypes(renderBody()).has('a'))
-
-// The Sidebar service's own address is not content. It used to be followed like any
-// other link, and because code-server persists the `?folder=` it was opened with, one
-// documentation example turned into a permanent "Workspace does not exist" dialog.
-const beforeServiceLink = openTabCalls.length
-chatValue = { legacy: { runningCalls: [], nodes: [replyWith(2, 'open http://127.0.0.1:8443/?folder=/C:/nope to get VS Code')] } }
-renderWatcher()
-check('the Sidebar service address is not followed as a link', openTabCalls.length === beforeServiceLink)
-check('the panel keeps showing the last real link', collectValue(renderBody(), 'value').includes('https://example.com/b'))
-
-// Regression: a frame that hides its referrer from the site gets refused by
-// embedded players (YouTube reports it as error 153), and an over-tight sandbox
-// breaks ordinary pages. Both were real bugs in the first version.
-check(
-  'the frame does not hide its referrer from the site',
-  collectValue(renderBody(), 'referrerPolicy').every((value) => value !== 'no-referrer'),
-)
-check(
-  'the frame sandbox still lets an ordinary page work',
-  String(collectValue(renderBody(), 'sandbox')[0] ?? '').includes('allow-forms'),
-)
-
-// A video host is rewritten to its player URL, because its watch page refuses framing.
-chatValue = { legacy: { runningCalls: [], nodes: [replyWith(2, 'https://www.youtube.com/watch?v=dQw4w9WgXcQ')] } }
-renderWatcher()
-check(
-  'a youtube watch link is rewritten to its embed URL',
-  collectValue(renderBody(), 'src').includes('https://www.youtube.com/embed/dQw4w9WgXcQ'),
-)
-// Bilibili gets the same treatment, through its official embed player.
-chatValue = { legacy: { runningCalls: [], nodes: [replyWith(4, 'https://www.bilibili.com/video/BV1j8JE6PEDa/')] } }
-renderWatcher()
-const bilibiliFrame = String(collectValue(renderBody(), 'src')[0] ?? '')
-check(
-  'a bilibili watch link goes to the embed player',
-  bilibiliFrame.startsWith('https://player.bilibili.com/player.html?bvid=BV1j8JE6PEDa'),
-)
-check('the bilibili embed pins page 1 and turns danmaku off', bilibiliFrame.includes('page=1') && bilibiliFrame.includes('danmaku=0'))
-// A ~300px column is narrower than any player's lowest comfortable tier, so the
-// panel needs a way to give the frame the whole screen.
-check(
-  'the panel header offers a fullscreen control',
-  collectValue(renderBody(), 'data-booster-fullscreen').includes('true'),
-)
-
-// A direct media file plays in a media element instead of a frame.
-chatValue = { legacy: { runningCalls: [], nodes: [replyWith(3, 'https://cdn.example.com/clip.mp4')] } }
-renderWatcher()
-check('a direct media link renders a video element', collectTypes(renderBody()).has('video'))
-check('a direct media link is not framed', !collectTypes(renderBody()).has('iframe'))
-
-// The same link must not reopen on every re-render.
-const openedBefore = openTabCalls.length
-renderWatcher()
-check('re-rendering does not reopen the same link', openTabCalls.length === openedBefore)
-
-// The module must be disposable through its enable switch.
-const disposedBefore = disposedSlots.length
-scopeValue = { modules: { preview: false, appearance: true, headerTools: true } }
-for (const listener of [...scopeListeners]) listener()
-check('disabling the module disposes its tab body and watcher', disposedSlots.length > disposedBefore)
-
-scopeValue = { modules: { preview: true, appearance: true, headerTools: true }, appearance: { accent: 'ocean' } }
-for (const listener of [...scopeListeners]) listener()
-check('selecting an accent stacks one override layer', accentLayers.length === 1)
-check('accent layer carries light+dark brand tokens', (() => {
-  const brand = accentLayers[0]?.tokens?.['--dsw-alias-brand-primary']
-  return typeof brand?.light === 'string' && typeof brand?.dark === 'string'
-})())
-check('re-enabling the module registers the tab type again', tabsRegistered.length >= 2)
-
-// The address field: a typed address is what the panel shows, and it is not replaced
-// by whatever link happens to come next.
-scopeValue = {
-  modules: { preview: true, appearance: true, headerTools: true },
-  preview: { linkMode: 'all', fileOpen: 'preview', codeServer: 'have', url: 'https://example.com/typed' },
-}
-for (const listener of [...scopeListeners]) listener()
-
-const typedBody = liveRegistration((r) => r.options.key === PREVIEW_ID)
-const typedTree = mount(typedBody.component, { sessionId: 'sess-1' })
-check('a hand-typed address is what the panel loads', collectValue(typedTree, 'src').includes('https://example.com/typed'))
-check('the panel offers an editable address field', collectTypes(typedTree).has('input'))
-
-const typedWatcher = liveRegistration((r) => r.options.id === 'dsh-booster-preview-watch')
-const openedBeforeTyped = openTabCalls.length
-chatValue = { legacy: { runningCalls: [], nodes: [replyWith(9, 'https://example.com/ignored')] } }
-mount(typedWatcher.component, { useChat: useChatStub, sessionId: 'sess-1' })
-check('a typed address is not replaced by a later link', openTabCalls.length === openedBeforeTyped)
+// The workbench entry point is also reachable on its own, resolving the Sidebar
+// service the way the module does.
+const directTabs = []
+client.openVSCodeTab({ get: (name) => (name === 'sidebarRight' ? { openTab: (kind) => directTabs.push(kind) } : undefined) })
+check('the entry point opens the VS Code tab by kind', directTabs[0] === 'booster-vscode')
 
 // The VS Code tab asks the host to start the service. Asking is a settings write, and
 // every write re-applies this module, so it must happen once per page load — otherwise
 // the tab would ask, re-apply, ask again, forever.
-scopeTo({ fileOpen: 'vscode', codeServer: 'none' })
+scopeTo({ codeServer: 'none' })
 const askingTab = liveRegistration((r) => r.options.key === VSCODE_TYPE?.id)
-const asksMade = () => scopeWrites.filter((w) => w.field === 'preview' && w.value?.startRequest > 0).length
+const asksMade = () => scopeWrites.filter((w) => w.field === 'vscode' && w.value?.startRequest > 0).length
 const asksBefore = asksMade()
 mount(askingTab.component, {})
 await waitFor(() => asksMade() > asksBefore, 2000)
@@ -891,20 +758,26 @@ mount(askingTab.component, {})
 await new Promise((resolve) => setTimeout(resolve, 150))
 check('and it asks only once per page load', scopeWrites.length === writesAfterAsk)
 
-// The bridge is chosen but no service answered: a written file still has to appear
-// somewhere. Re-apply with exactly that configuration and watch where it opens.
+// The module must be disposable through its enable switch, without taking the
+// other modules with it.
+const disposedBefore = disposedSlots.length
+scopeValue = { modules: { vscode: false, appearance: true, headerTools: true } }
+for (const listener of [...scopeListeners]) listener()
+check('disabling the module disposes its tab body and tab type', disposedSlots.length > disposedBefore)
+check('and the other modules stay live', liveNames().includes('conversation.session.header.utilities'))
+
 scopeValue = {
-  modules: { preview: true, appearance: true, headerTools: true },
-  preview: { linkMode: 'all', fileOpen: 'vscode', codeServer: 'none' },
+  modules: { vscode: true, appearance: true, headerTools: true },
+  appearance: { accent: 'ocean', fontFamily: 'default' },
 }
 for (const listener of [...scopeListeners]) listener()
+check('selecting an accent stacks one override layer', accentLayers.length === 1)
+check('accent layer carries light+dark brand tokens', (() => {
+  const brand = accentLayers[0]?.tokens?.['--dsw-alias-brand-primary']
+  return typeof brand?.light === 'string' && typeof brand?.dark === 'string'
+})())
+check('re-enabling the module registers the tab type again', tabsRegistered.length >= 2)
 
-const fallbackWatcher = liveRegistration((r) => r.options.id === 'dsh-booster-preview-watch')
-const fallbackBefore = openedResources.length
-chatValue = { legacy: { runningCalls: [{ callId: 'fb1', name: 'write', argsRaw: '{"file_path":"src/fb.ts"}' }], nodes: [] } }
-mount(fallbackWatcher.component, { useChat: useChatStub, sessionId: 'sess-fb' })
-check('a write still opens somewhere when the service is absent', openedResources.length === fallbackBefore + 1)
-check('and it is the built-in previewer that opened it', String(openedResources.at(-1)).includes('sess-fb'))
 // ------------------------------------------- service-acquisition regression
 console.log('\nservice acquisition')
 
@@ -967,16 +840,11 @@ function acquisitionScenario(options) {
 const late = acquisitionScenario({ syncTabs: false, hasInject: true, injectProvides: true })
 client.apply(late.ctx)
 check('waits for sidebarRightTabs when it is not published yet', late.records.injected.includes('sidebarRightTabs') === true)
-check('registers the tab type once the service arrives', late.records.tabs.length === 2)
+check('registers the tab type once the service arrives', late.records.tabs.length === 1)
 check(
   'registers the tab body once the service arrives',
-  late.records.slots.some((r) => r.name === 'sidebar.right.pane.tab' && r.key === 'dsh-booster/preview-web'),
-)
-check(
-  'registers the VS Code body once the service arrives',
   late.records.slots.some((r) => r.name === 'sidebar.right.pane.tab' && r.key === 'dsh-booster/vscode'),
 )
-check('registers the watcher once the service arrives', late.records.slots.some((r) => r.id === 'dsh-booster-preview-watch'))
 
 const unreachable = acquisitionScenario({ syncTabs: false, hasInject: false })
 client.apply(unreachable.ctx)
@@ -988,7 +856,7 @@ check('contributes nothing else when the service is unreachable', unreachable.re
 
 const immediate = acquisitionScenario({ syncTabs: true })
 client.apply(immediate.ctx)
-check('still starts synchronously when the service is already up', immediate.records.tabs.length === 2)
+check('still starts synchronously when the service is already up', immediate.records.tabs.length === 1)
 check('does not wait when the synchronous read succeeds', immediate.records.injected.includes('sidebarRightTabs') === false)
 
 // ------------------------------------------------------------------ verdict

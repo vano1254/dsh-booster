@@ -5,6 +5,34 @@ All notable changes to `dsh-booster` are recorded here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0-beta.1] - 2026-09-28
+
+这一版是**减法**。DSH 0.1.6 把插件的两块功能收进了产品本身，于是它们从插件里删掉了 —— 留着只会变成两套机制抢同一个侧栏。
+
+### Removed
+
+- **网页面板**：跟随回复里的链接、可手填的地址栏、YouTube/B 站换 embed、直链走 `<video>`。
+  产品现在支持**在侧边栏以浏览器模式访问指定 URL**，插件的这一套是重复实现。
+- **写文件时的文档预览路由**：自己拼 `dsh-resource://` 地址、调用开始与结束各开一次以刷新。
+  产品现在默认把文件引用与交付文件放进侧边栏预览，回合结束还有文件改动卡片与逐文件对比。
+- 整个 `src/client/modules/preview.tsx`（997 行）及其全部行为，连带 `linkMode` 与 `url` 两个设置项。
+
+### Changed
+
+- 模块换主角：`vscode`（右侧真 VS Code）、`appearance`、`headerTools`、`chime`。设置键 `preview` 改名为 `vscode`。
+- `fileOpen` 从三态收敛为两态：`vscode` / `off`。原先的第三个值在描述"用产品自带的预览器打开"—— 那是插件替产品做的决定，现在这个决定归产品，插件不必再表达它。
+- 安装与卸载说明改成 **桌面版 profile**（`--profile desktop`）：桌面应用是 `profiles/desktop`，命令行 `dsh web` 是 `profiles/web`，两者插件各自独立。
+- 客户端产物 **62.8 KB → 53.0 KB**；少了一整个模块和它的分支。
+
+### Fixed
+
+- 在 **DSH 0.1.7-rc.2 桌面版**下重新验证：宿主 `lib/index.js` 与客户端 `lib/client.js` 都做**真实 import**（不只是语法检查），客户端产物确认 `__ModuleLoader__.load` 被调用且导出齐全。
+- 设置页的 `settings.section` 与标签页的 `sidebar.right.pane.tab` 两个槽位在 0.1.7 里逐个核对过仍然存在、且 key 未被占用。
+
+### Notes
+
+- 宿主侧监听器的回收**不需要额外代码**：Cordis 的 `on()` 实现是 `this.ctx.fiber.effect(…)`，注释写明监听器"随其所属 fiber 自动销毁"，`Service.register` 同理。0.1.6 要求的"检查插件加载与卸载逻辑"因此本来就满足。
+
 ## [0.2.0-beta.1] - 2026-09-15
 
 ### Added

@@ -9,8 +9,8 @@
 import { appearanceModule } from './appearance.ts'
 import { chimeModule } from './chime.ts'
 import { headerToolsModule } from './header-tools.tsx'
-import { previewModule } from './preview.tsx'
+import { vscodeModule } from './vscode.tsx'
 import type { BoosterModule } from '../runtime.ts'
 
 /** Every module this build ships. */
-export const MODULES: readonly BoosterModule[] = [previewModule, appearanceModule, headerToolsModule, chimeModule]
+export const MODULES: readonly BoosterModule[] = [vscodeModule, appearanceModule, headerToolsModule, chimeModule]

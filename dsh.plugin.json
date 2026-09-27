@@ -1,8 +1,8 @@
 {
   "id": "dsh-booster",
-  "version": "0.2.0-beta.1",
+  "version": "0.3.0-beta.1",
   "main": "lib/index.js",
-  "description": "DSH Web GUI 增强套件：模块化的外观与交互优化（设置页统一开关，配置写入 settings.yaml）。",
+  "description": "DSH 增强套件：右侧栏里的真 VS Code（按需启动）、外观与标题栏工具、完成提示音（设置页统一开关，配置写入 settings.yaml）。",
   "engines": {
     "dsh": ">=0.1.5-rc.1"
   },

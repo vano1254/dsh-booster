@@ -103,7 +103,7 @@ async function answerStartRequest(host: BoosterHostContext, config: BoosterSetti
     if (settings?.replace === undefined) return
     await settings.replace(BOOSTER_NAMESPACE, {
       ...config,
-      preview: { ...config.preview, codeServer: up ? 'have' : 'none', startRequest: 0 },
+      vscode: { ...config.vscode, codeServer: up ? 'have' : 'none', startRequest: 0 },
     })
   } catch (error) {
     console.error('[dsh-booster] answering a start request failed:', error)
@@ -173,7 +173,7 @@ export function apply(ctx: Context): void {
     try {
       const settings = host.get('settings') as SettingsFace | undefined
       const config = normalizeBoosterSettings(settings?.get(BOOSTER_NAMESPACE))
-      if (config.preview.fileOpen !== 'vscode') return
+      if (config.vscode.fileOpen !== 'vscode') return
 
       const call = execution as { name?: unknown; arguments?: unknown } | undefined
       if (call === undefined || typeof call.name !== 'string' || !FILE_TOOLS.has(call.name)) return
@@ -255,9 +255,9 @@ export function apply(ctx: Context): void {
         void playChime('done')
       }
 
-      if (config.preview.fileOpen !== 'vscode') return
-      if (config.preview.startRequest <= lastStartRequest) return
-      lastStartRequest = config.preview.startRequest
+      if (config.vscode.fileOpen !== 'vscode') return
+      if (config.vscode.startRequest <= lastStartRequest) return
+      lastStartRequest = config.vscode.startRequest
       // Forced: the user asked by opening the tab, so the retry window does not apply.
       void answerStartRequest(host, config)
     } catch (error) {

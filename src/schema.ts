@@ -17,16 +17,15 @@ import {
   DEFAULT_CHIME,
   DEFAULT_HEADER_TOOLS,
   DEFAULT_MODULES,
-  DEFAULT_PREVIEW,
+  DEFAULT_VSCODE,
   FILE_OPEN_TARGETS,
   FONT_FAMILY_CHOICES,
-  LINK_MODES,
 } from './settings.ts'
 
 /** The durable shape of the `booster` section. */
 export const BoosterSchema = Schema.object({
   modules: Schema.object({
-    preview: Schema.boolean().default(DEFAULT_MODULES.preview === true),
+    vscode: Schema.boolean().default(DEFAULT_MODULES.vscode === true),
     appearance: Schema.boolean().default(DEFAULT_MODULES.appearance === true),
     headerTools: Schema.boolean().default(DEFAULT_MODULES.headerTools === true),
   }).default({ ...DEFAULT_MODULES }),
@@ -43,13 +42,11 @@ export const BoosterSchema = Schema.object({
     readingSize: Schema.boolean().default(DEFAULT_HEADER_TOOLS.readingSize),
   }).default({ ...DEFAULT_HEADER_TOOLS }),
 
-  preview: Schema.object({
-    linkMode: Schema.union(LINK_MODES.map((mode) => Schema.const(mode))).default(DEFAULT_PREVIEW.linkMode),
-    fileOpen: Schema.union(FILE_OPEN_TARGETS.map((target) => Schema.const(target))).default(DEFAULT_PREVIEW.fileOpen),
-    codeServer: Schema.union(CODE_SERVER_STATES.map((state) => Schema.const(state))).default(DEFAULT_PREVIEW.codeServer),
-    url: Schema.string().default(DEFAULT_PREVIEW.url),
-    startRequest: Schema.number().default(DEFAULT_PREVIEW.startRequest),
-  }).default({ ...DEFAULT_PREVIEW }),
+  vscode: Schema.object({
+    fileOpen: Schema.union(FILE_OPEN_TARGETS.map((target) => Schema.const(target))).default(DEFAULT_VSCODE.fileOpen),
+    codeServer: Schema.union(CODE_SERVER_STATES.map((state) => Schema.const(state))).default(DEFAULT_VSCODE.codeServer),
+    startRequest: Schema.number().default(DEFAULT_VSCODE.startRequest),
+  }).default({ ...DEFAULT_VSCODE }),
 
   chime: Schema.object({
     minSeconds: Schema.union(CHIME_MIN_SECONDS.map((seconds) => Schema.const(seconds))).default(DEFAULT_CHIME.minSeconds),

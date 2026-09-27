@@ -7,54 +7,70 @@
 - 这是**我自己日常在用的那份配置**，顺手整理出来的，不是团队维护的产品。
 - **不保证在你的 DSH 版本或系统上同样好用**；没有兼容性承诺，issue / PR 随缘看。
 - **后续随缘更新**：我用到什么、烦什么就加什么改什么。想要稳定的东西，建议 fork 自己维护。
-- 当前 `0.2.0-beta.1`：beta 阶段，设置项和默认值还可能变。
+- 当前 `0.3.0-beta.1`：beta 阶段，设置项和默认值还可能变。
 
 功能细节在下面「使用」一节。先说三条可能影响你决定的事：
 
 - **模块全部可选**。关掉的模块不注册槽位、不起定时器、不注入 CSS。
-- **侧栏预览**：回复里出现链接时，右侧栏的网页面板加载它；面板顶部有一个**自己能改的地址栏**，手填之后就不再被后续链接顶掉。
-- **「右侧 VS Code」是可选的**。要额外装一个约 675 MB 的独立程序（code-server），**仅 Windows**；不装也照样用，写文件时走产品自带的预览器。
+- **只剩右侧 VS Code 这一件事**：网页预览与文件预览已经由 DSH 自己做（0.1.6 起），所以插件把它们删了，见下面「这版砍掉了什么」。
+- **「右侧 VS Code」是可选的**。要额外装一个约 675 MB 的独立程序（code-server），**仅 Windows**；不装也照样用，文件交给 DSH 自己处理。
 
 ---
 
 ## 安装
 
+> **桌面版的 profile 由应用自己管**，命令行会直接拒绝它：
+>
+> ```
+> error: profile "desktop" is managed exclusively by the Electron application
+> ```
+>
+> 所以桌面版只能走**应用内的插件页**；`--profile web` 那条路只适用于命令行版。
+
+**桌面版（这个应用）**：设置 → 插件 → 安装插件，填下面这个地址（GitHub tarball，无需 npm 账号）：
+
+```
+https://github.com/vano1254/dsh-booster/archive/refs/tags/v0.3.0-beta.1.tar.gz
+```
+
+装好后在同一页启用它（0.1.7 支持实时开启/禁用），必要时重启应用。
+
+**命令行版（`dsh web`）**：
+
 ```sh
 # 方式一：GitHub tarball（推荐，无需 npm 账号）
-dsh plugin --profile web add https://github.com/vano1254/dsh-booster/archive/refs/tags/v0.2.0-beta.1.tar.gz
+dsh plugin --profile web add https://github.com/vano1254/dsh-booster/archive/refs/tags/v0.3.0-beta.1.tar.gz
 
 # 方式二：本地开发（源码改动即时可见，仍需重启 GUI）
 dsh plugin --profile web add link:/absolute/path/to/dsh-booster
 ```
 
-> **没有"npm 安装"这一种。** 仓库里的 `package.json` 是 npm 形状的，但这个包**从未发布到 npm**，所以 `dsh plugin --profile web add dsh-booster` 会 404。想要那条路，就自己发一次包（`npm publish`）—— 本仓库不替你做这件事。
+> **没有"npm 安装"这一种。** 仓库里的 `package.json` 是 npm 形状的，但这个包**从未发布到 npm**，所以直接用包名安装会 404。想要那条路，就自己发一次包（`npm publish`）—— 本仓库不替你做这件事。
 
-**装完必须重启 Web GUI 才生效**（客户端模块图在启动时组装）。
+**装完必须重启才生效**（客户端模块图在启动时组装）。
 
 ### 装完先做一个选择：要不要右侧那个真 VS Code
 
-重启后在 **设置 → 增强套件 → 侧栏预览** 里会问你一次。两条路都能用，没有哪条是"残废版"：
+重启后在 **设置 → 增强套件 → 右侧 VS Code** 里会问你一次。两条路都能用，没有哪条是"残废版"：
 
 | 选择 | 你得到什么 | 代价 |
 |---|---|---|
 | **要** | 右侧栏多一个**真的 VS Code** 标签页（code-oss 本体，96 个内置扩展），模型写/改文件时自动打开那个文件 | 磁盘 **675 MB**（独立程序，**不属于本插件**；仅 Windows；无微软市场，装不了市场扩展） |
-| **不要** | 三个 UI 模块照常：外观、标题栏快捷工具、链接/视频面板；写文件时用**产品自带的**预览器打开 | 无 |
+| **不要** | 外观、标题栏快捷工具、完成提示音照常；文件交给 DSH 自己预览（它 0.1.6 起本来就会） | 无 |
 
 要的话，一条命令装好（下载官方 tarball → 校验 → 解压 → 装桥接扩展 → 起服务）：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File tools\setup-code-server.ps1
+# 脚本在插件目录里，这条会自动找到它（web / desktop 都适用）
+$d = Get-ChildItem "$env:USERPROFILE\.dsh\profiles\*\node_modules\dsh-booster" -Directory -ErrorAction SilentlyContinue | Select-Object -First 1
+powershell -ExecutionPolicy Bypass -File (Join-Path $d.FullName 'tools\setup-code-server.ps1')
 ```
 
 不要就什么都不用做。插件**不会静默失败，也不会偷改你的设置**：检测不到服务时它只在**那一次**改用产品自带的预览器打开文件，你选的"代码文件打开方式"保持原样，设置页和那个标签页里会说明当前状态、以及想装该跑哪条命令。
 
-**平台**：三个 UI 模块（外观 / 标题栏工具 / 链接视频面板）是纯浏览器代码，跨平台。**「右侧 VS Code」那一整套仅 Windows**——它依赖 PowerShell 与 WMI，详见下面那一节。
+**平台**：外观 / 标题栏工具 / 完成提示音是纯浏览器或宿主 Node 代码，跨平台。**「右侧 VS Code」那一整套仅 Windows**——它依赖 PowerShell 与 WMI，详见下面那一节。
 
-卸载：
-
-```sh
-dsh plugin --profile web remove dsh-booster
-```
+卸载：桌面版在插件页里卸载；命令行版用 `dsh plugin --profile web remove dsh-booster`。
 
 ## 使用
 
@@ -62,7 +78,7 @@ dsh plugin --profile web remove dsh-booster
 
 | 模块 | 内容 | 默认 |
 |---|---|---|
-| **侧栏预览** | 你在写代码或给出链接时，右侧栏自动弹出并加载：网页/视频在这里的网页面板打开，代码文件按 `preview.fileOpen` 三态分派（右侧 VS Code / 内置预览 / 不打开） | 开 |
+| **右侧 VS Code** | 右侧栏里那个**真的** VS Code（按需启动、无自启动），模型写/改文件时把文件送进那个窗口；按 `vscode.fileOpen` 两态分派（送过去 / 只让 DSH 自己处理） | 开 |
 | **外观** | 强调色（默认/海蓝/森林/紫罗兰）、界面字体（系统无衬线/微软雅黑/宋体衬线）、会话阅读字号 | 开 |
 | **标题栏快捷工具** | 会话标题栏里的侧栏开关 + 阅读字号 ± 步进 | 开 |
 | **完成提示音** | 一轮回答结束后响一声（可设最短时长、出错用另一声），**由宿主机播放**，所以你把界面切到别处也听得到 | 关 |
@@ -90,34 +106,20 @@ booster:
 
 手改这个文件同样生效（GUI 会收到设置变更通知）。
 
-## 侧栏预览（preview）
+## 这版砍掉了什么（以及为什么）
 
-右侧栏变成一块"正在做什么"的预览面。两个触发，都从会话快照在浏览器侧读取，没有自有 RPC：
+0.1.6 起，产品自己接管了两件事，插件的同名机制就变成"两套东西抢同一个侧栏"：
 
-| 你在做什么 | 右侧栏怎么反应 |
-|---|---|
-| 写/改文件（`write` / `edit`） | 按 `preview.fileOpen` 分派：`vscode` 交给右侧的 code-server（见下一节）、`preview` 用产品自带的预览器、`off` 什么都不做 |
-| 回复里给出链接 | 打开本模块自己的网页面板并加载它 |
+| 插件曾经有 | 产品现在有 | 结论 |
+|---|---|---|
+| 网页面板：跟随回复里的链接、可手填地址栏、YouTube/B 站换 embed、直链走 `<video>` | 侧边栏以浏览器模式访问指定 URL | **删掉** |
+| 把写出的文件路由到产品自带的文档预览（自己拼 `dsh-resource://` 地址、调用开始/结束各开一次） | 文件引用与交付文件默认由侧边栏预览，回合结束还有文件改动卡片和逐文件对比 | **删掉** |
 
-几点说明：
+两个模块的全部代码（997 行的 `modules/preview.tsx`）连同 `linkMode` / `url` 两个设置项一起删除，客户端产物 **62.8 KB → 53.0 KB**。
 
-1. **代码不自己画**。选 `preview` 时，文件走 `ctx.sidebarRight.openResource('dsh-resource://file/session/<sessionId>/<path>')`，落到官方 `dsh-client-ui-sidebar-documentpreview` 的代码渲染器上。调用**开始时**先打开一次（面板立刻弹出），**结束时再打开一次**，让预览能拿到写完之后的内容。
-2. **只做内置预览够不着的那部分**。内置预览只认 `dsh-resource://` 地址，没法显示 `https://` 页面，所以网页/视频由这里一个很小的标签页类型 + iframe / `<video>` 承担。
-3. **视频链接换成播放器地址**。YouTube 的 `watch?v=` 换成 `/embed/`，B 站的 `video/BV…` 换成 `player.bilibili.com`——因为它们的观看页普遍拒绝被 iframe 嵌入。直链媒体（`.mp4` / `.webm` / `.m3u8` 等）直接用 `<video>` 播。
-4. **不做逐条审阅**。这里的第一版做的是"每次改动一页、可翻页的 diff 审阅"，方向错了——那是编辑器 review 的模式，不是"侧栏跟着我正在做的事实时加载"。现在只显示当下在做的东西。
+于是插件只剩产品没做的那件事：**右侧栏里那个真的 VS Code**，外加外观、标题栏工具、完成提示音。
 
-5. **地址可以手填**。面板顶部就是一个可编辑的地址栏 —— 显示当前地址（跟随来的链接也显示在这里，所以你看得到自己在看什么），改完回车即加载。**一旦手填，面板就不再被后续回复里的链接替换**；点「跟随链接」交回自动跟随。手填的地址存在 `preview.url`，刷新后还在。
-
-配置里可以把链接跟随限制成**只跟视频**（`preview.linkMode: video`），或直接关掉整个模块。
-
-已知限制（如实说）：
-
-- **能否嵌入由目标站点决定**。站点设了 `X-Frame-Options` / `frame-ancestors` 时 iframe 会空白，面板顶部一直留着一个「在浏览器打开」的出口。DSH 页面本身没有 CSP 限制嵌入（已核对）。
-- **iframe 会带上来源（Referer），这是故意的**。嵌入播放器看不到自己是被谁框住的就会拒绝启动——YouTube 报的 `错误 153` 就是这个。默认策略只发 origin，不发路径。`sandbox` 仍然禁止顶层跳转，那是唯一故意省掉的 token；`allow-forms` / `allow-modals` / `allow-popups` 保留，否则普通网页用不了。
-- **直链媒体不吃这套**。`.mp4` / `.webm` / `.m3u8` 走 `<video>`：没有 iframe、没有嵌入策略、没有 referrer 要求，所以它是最可靠的验证路径。
-- **窄栏里视频会糊，这是物理限制不是 bug**。嵌入播放器按播放器像素尺寸自动选清晰度，而右侧栏正常宽度只有 300px 出头，低于任何播放器的最低舒适档，所以它给最低画质；B 站还额外按登录态封顶。参数层面只有 `high_quality=1`（已加），真正的解法是给它像素——所以面板头部有一个**「全屏」按钮**（`requestFullscreen` 打在框架容器上），右侧栏自己的呈现开关也能达到同样效果。B 站还加了 `as_wide=1`（宽模式，少两侧留白）和 `danmaku=0`（窄栏里弹幕挡画面）。
-- **非视频链接也可能被拒**。所以默认 `linkMode: all` 会在每次回复带链接时加载；嫌吵就切成 `video`。
-- **缺服务时不静默失败**。如果某次启动拿不到右侧栏的服务，模块会注册一个不可见的覆盖层条目，id 形如 `dsh-booster-diag-<原因>`（例如 `dsh-booster-diag-inject-no-service`）——浏览器控制台从外部读不到，这个 id 让失败状态可以从运行时检查面读到。
+`fileOpen` 也跟着收敛成两态：`vscode`（交给插件桥接的 code-server）/ `off`（只让 DSH 自己处理）。原先还有第三个值在描述"用产品自带的预览器打开"—— 那是插件**替产品做的决定**，现在这个决定归产品自己，插件不再需要表达它。
 
 ## 右侧 VS Code（可选，**仅 Windows**）
 
@@ -174,11 +176,11 @@ VS Code 是一个**独立的标签页类型**（kind `booster-vscode`），和�
 
 ### 不想要它
 
-设置 → 增强套件 → 侧栏预览 → `代码文件打开方式` 改成「产品自带预览器」或「不自动打开」，桥接那条路自然闲置。要回收磁盘就删掉 `%LOCALAPPDATA%\code-server\`（675 MB）——**插件一行都不用改**。
+设置 → 增强套件 → 右侧 VS Code → `代码文件打开方式` 改成「只让 DSH 自己处理」，桥接那条路自然闲置。要回收磁盘就删掉 `%LOCALAPPDATA%\code-server\`（675 MB）——**插件一行都不用改**。
 
 ## 路线图（随缘）
 
-已经能用的：装 / 开 / 关 / 持久化 / 重启后还在；侧栏预览（含可手填的地址栏）、外观、标题栏快捷工具；可选的「右侧 VS Code」（含一键安装脚本、装完问一次）。
+已经能用的：装 / 开 / 关 / 持久化 / 重启后还在；「右侧 VS Code」（含一键安装脚本、装完问一次、打开标签页自动拉起）、外观、标题栏快捷工具、完成提示音。
 
 想做的（没有时间表，我用到才做）：
 
@@ -203,7 +205,7 @@ VS Code 是一个**独立的标签页类型**（kind `booster-vscode`），和�
 
 - **只在本机地址可用持久化**：通过非 loopback 地址访问 Web GUI 时，DSH 的设置传输不落盘，此时开关只在本次会话有效。
 - **必须重启 GUI**：客户端插件模块图在启动时组装，改完配置即时生效，但装/卸插件本身要重启。
-- **升级兼容**：DSH 迭代较快，本插件的开发与验证针对 **DSH 0.1.5-rc.1**（`dsh.plugin.json` 的 `engines.dsh` 就是这个下限）。本插件只使用 slots、主题 token 与设置通道这三类稳定扩展面，并优先用可选服务（`ctx.get`）而非硬依赖。如果你的 DSH 版本上有异常，欢迎开 issue 并附上版本号。
+- **升级兼容**：本插件的开发与验证针对 **DSH 0.1.7-rc.2 桌面版**（profile `desktop`）。0.1.6 把网页面板与文件预览收进产品后，本插件删掉了自己的同名实现 —— 用更老的 DSH 时，那部分能力就没有了（右侧 VS Code 不受影响）。本插件只使用 slots、主题 token 与设置通道这三类稳定扩展面，并优先用可选服务（`ctx.get`）而非硬依赖。
 
 ## 开发
 
@@ -224,6 +226,7 @@ npm run audit     # 发布前审计：本机用户名/家目录/主机名/密钥
 src/index.ts               宿主半边：注册设置命名空间 + 在 write/edit 之后落桥接请求
 src/bridge.ts              宿主：桥接请求文件的路径与形状（与扩展的约定）
 src/service.ts             宿主：按需拉起 code-server（Windows / WMI）
+src/chime.ts               宿主：合成并播放完成提示音（纯波形，不含音频素材）
 src/settings.ts            双端共享的纯类型与默认值（不含 schema）
 src/schema.ts              仅宿主：schemastery schema
 src/client/index.ts        客户端入口：绑定命名空间、启模块、注册设置页

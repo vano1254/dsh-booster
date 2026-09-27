@@ -17,18 +17,20 @@ export type FontFamilyChoice = 'default' | 'system' | 'yahei' | 'serif'
 /** Accent palette applied as a stacked alias-token override layer. */
 export type AccentChoice = 'default' | 'ocean' | 'forest' | 'violet'
 
-/** Which links found in the agent's replies open in the right-Sidebar panel. */
-export type LinkMode = 'all' | 'video'
-
-/** Where a settled file edit is shown. */
-export type FileOpenTarget = 'vscode' | 'preview' | 'off'
+/**
+ * What happens to a file the agent writes or edits.
+ *
+ * Two values, because the plugin no longer routes files anywhere: either the workbench
+ * is handed the file, or the plugin stays out of the way and DSH does whatever it does
+ * with file references. There is no third meaning left to encode.
+ */
+export type FileOpenTarget = 'vscode' | 'off'
 
 /**
  * What is known about the Sidebar's code-server, decided once and then remembered.
  *
- * `unknown` means nobody has looked yet — the state a fresh install starts in, and
- * the moment the plugin asks. `have` and `none` are the two answers; `none` is what
- * makes the built-in previewer the fallback instead of a silent no-op.
+ * `unknown` means nobody has looked yet — the state a fresh install starts in, and the
+ * moment the plugin asks. `have` and `none` are the two answers.
  */
 export type CodeServerState = 'unknown' | 'have' | 'none'
 
@@ -48,28 +50,22 @@ export interface HeaderToolsSettings {
   readingSize: boolean
 }
 
-/** Preview module preferences. */
-export interface PreviewSettings {
-  /** `all` follows every http(s) link in a reply; `video` only video links. */
-  linkMode: LinkMode
-  /** `vscode` hands the file to the Sidebar's code-server bridge. */
+/** Right-Sidebar VS Code preferences. */
+export interface VscodeSettings {
+  /**
+   * What happens to a file the agent writes or edits.
+   *
+   * `vscode` hands it to the Sidebar's code-server bridge; `off` leaves the file to the
+   * product, which has previewed file references in the Sidebar by itself since 0.1.6.
+   */
   fileOpen: FileOpenTarget
   /**
    * Whether the Sidebar's code-server has been looked for, and what was found.
    *
-   * `unknown` is the fresh-install state: the plugin probes once, and on "not
-   * there" it drops `fileOpen` back to the built-in previewer rather than leaving
-   * file writes with nowhere to appear.
+   * `unknown` is the fresh-install state: the plugin probes once and remembers the
+   * answer, so the tab can explain itself instead of showing a blank pane.
    */
   codeServer: CodeServerState
-  /**
-   * An address typed by hand into the panel, or an empty string to follow links.
-   *
-   * While this is set the panel shows it and stops following the agent's links, so a
-   * page the user is reading is not replaced by the next URL in a reply. Submitting an
-   * empty field restores following.
-   */
-  url: string
   /**
    * A start request from the browser, as a timestamp the client bumps.
    *
@@ -104,15 +100,15 @@ export interface BoosterSettings {
   appearance: AppearanceSettings
   /** Header-tools module configuration. */
   headerTools: HeaderToolsSettings
-  /** Preview module configuration. */
-  preview: PreviewSettings
+  /** Right-Sidebar VS Code configuration. */
+  vscode: VscodeSettings
   /** Completion-chime configuration. */
   chime: ChimeSettings
 }
 
 /** Default enable state per module id. */
 export const DEFAULT_MODULES: Record<string, boolean> = {
-  preview: true,
+  vscode: true,
   appearance: true,
   headerTools: true,
   chime: false,
@@ -130,12 +126,10 @@ export const DEFAULT_HEADER_TOOLS: HeaderToolsSettings = {
   readingSize: true,
 }
 
-/** Default preview configuration. */
-export const DEFAULT_PREVIEW: PreviewSettings = {
-  linkMode: 'all',
+/** Default right-Sidebar VS Code configuration. */
+export const DEFAULT_VSCODE: VscodeSettings = {
   fileOpen: 'vscode',
   codeServer: 'unknown',
-  url: '',
   startRequest: 0,
 }
 
@@ -155,11 +149,8 @@ export const ACCENT_CHOICES: readonly AccentChoice[] = ['default', 'ocean', 'for
 /** Every selectable interface font, in menu order. */
 export const FONT_FAMILY_CHOICES: readonly FontFamilyChoice[] = ['default', 'system', 'yahei', 'serif']
 
-/** Every selectable link-following mode, in menu order. */
-export const LINK_MODES: readonly LinkMode[] = ['all', 'video']
-
 /** Every selectable file-open target, in menu order. */
-export const FILE_OPEN_TARGETS: readonly FileOpenTarget[] = ['vscode', 'preview', 'off']
+export const FILE_OPEN_TARGETS: readonly FileOpenTarget[] = ['vscode', 'off']
 
 /** Every remembered code-server answer, in the order the plugin reaches them. */
 export const CODE_SERVER_STATES: readonly CodeServerState[] = ['unknown', 'have', 'none']
@@ -179,14 +170,14 @@ export function normalizeBoosterSettings(value: unknown): BoosterSettings {
   const modules = (raw.modules !== null && typeof raw.modules === 'object' ? raw.modules : {}) as Record<string, boolean>
   const appearance = (raw.appearance !== null && typeof raw.appearance === 'object' ? raw.appearance : {}) as Partial<AppearanceSettings>
   const headerTools = (raw.headerTools !== null && typeof raw.headerTools === 'object' ? raw.headerTools : {}) as Partial<HeaderToolsSettings>
-  const preview = (raw.preview !== null && typeof raw.preview === 'object' ? raw.preview : {}) as Partial<PreviewSettings>
+  const vscode = (raw.vscode !== null && typeof raw.vscode === 'object' ? raw.vscode : {}) as Partial<VscodeSettings>
   const chime = (raw.chime !== null && typeof raw.chime === 'object' ? raw.chime : {}) as Partial<ChimeSettings>
 
   return {
     modules: { ...DEFAULT_MODULES, ...modules },
     appearance: { ...DEFAULT_APPEARANCE, ...appearance },
     headerTools: { ...DEFAULT_HEADER_TOOLS, ...headerTools },
-    preview: { ...DEFAULT_PREVIEW, ...preview },
+    vscode: { ...DEFAULT_VSCODE, ...vscode },
     chime: { ...DEFAULT_CHIME, ...chime },
   }
 }

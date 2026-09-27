@@ -14,14 +14,12 @@ import {
   CHIME_MIN_SECONDS,
   FILE_OPEN_TARGETS,
   FONT_FAMILY_CHOICES,
-  LINK_MODES,
   type AccentChoice,
   type BoosterSettings,
   type FileOpenTarget,
   type FontFamilyChoice,
-  type LinkMode,
 } from '../settings.ts'
-import { CodeServerRow, openVSCodeTab, resolveCodeServer } from './modules/preview.tsx'
+import { CodeServerRow, openVSCodeTab, resolveCodeServer } from './modules/vscode.tsx'
 import { FONT_SIZE_MAX, FONT_SIZE_MIN, readFontSize, subscribeTheme, writeFontSize } from './theme.ts'
 import type { Translate } from './locale.ts'
 import type { BoosterModule, BoosterStore } from './runtime.ts'
@@ -209,14 +207,14 @@ const BODIES: Record<string, (props: BodyProps) => ReactNode> = {
     </>
   ),
 
-  preview: ({ settings, store, t, openVSCode }) => (
+  vscode: ({ settings, store, t, openVSCode }) => (
     <>
       <CodeServerRow
-        preview={settings.preview}
-        set={(value) => store.set('preview', value)}
+        vscode={settings.vscode}
+        set={(value) => store.set('vscode', value)}
         t={t}
         recheck={() => {
-          void resolveCodeServer({ settings: store.get().preview, set: (value) => store.set('preview', value) })
+          void resolveCodeServer({ settings: store.get().vscode, set: (value) => store.set('vscode', value) })
         }}
       />
 
@@ -240,34 +238,14 @@ const BODIES: Record<string, (props: BodyProps) => ReactNode> = {
         <div className="booster-row__control">
           <select
             className="booster-select"
-            value={settings.preview.fileOpen}
+            value={settings.vscode.fileOpen}
             onChange={(event) =>
-              store.set('preview', { ...settings.preview, fileOpen: event.target.value as FileOpenTarget })
+              store.set('vscode', { ...settings.vscode, fileOpen: event.target.value as FileOpenTarget })
             }
           >
             {FILE_OPEN_TARGETS.map((target) => (
               <option key={target} value={target}>
                 {t(`preview.fileOpen.${target}`)}
-              </option>
-            ))}
-          </select>
-        </div>
-      </div>
-
-      <div className="booster-row">
-        <div>
-          <div className="booster-row__label">{t('preview.links')}</div>
-          <div className="booster-row__hint">{t('preview.hint')}</div>
-        </div>
-        <div className="booster-row__control">
-          <select
-            className="booster-select"
-            value={settings.preview.linkMode}
-            onChange={(event) => store.set('preview', { ...settings.preview, linkMode: event.target.value as LinkMode })}
-          >
-            {LINK_MODES.map((mode) => (
-              <option key={mode} value={mode}>
-                {t(`preview.linkMode.${mode}`)}
               </option>
             ))}
           </select>
