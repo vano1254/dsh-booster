@@ -5,6 +5,23 @@ All notable changes to `dsh-booster` are recorded here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0-beta.4] - 2026-09-28
+
+### Compatibility
+
+- **Verified against DSH 0.2.0-rc.1** (the desktop app, and the first 0.2.0 candidate). The
+  release notes touch nothing this plugin owns — no sound/notification work, no editor, no
+  sidebar-tab or slot changes — and the machine-readable contracts check out: the tab
+  definition type (`guide`, the three priority bands, the `register` signature) is
+  **byte-identical** to 0.1.7-rc.2 (10380 characters), `sidebar.right.pane.tab` and
+  `sidebarRightTabs` are still shipped, the official client plugins still inject `slots`,
+  the client-module scan and the `__ModuleLoader__` handshake are unchanged, and all three
+  host events this plugin listens to (`agent/status`, `agent/error`, `tools/result`) still
+  exist. On the upgraded app the host half loads (`status: schema`) and a real file write
+  still drops a bridge request.
+- **`engines.dsh` raised to `>=0.2.0-rc.1`** to match what it is verified against. The code
+  also runs on 0.1.7-rc.2; lower that field yourself if you are still there.
+
 ## [0.3.0-beta.3] - 2026-09-28
 
 ### Fixed

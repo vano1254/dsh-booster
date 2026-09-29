@@ -9,14 +9,14 @@
 
 **只有这两件，是刻意的。** 产品已经自己做了的事，这里一概不做（下面有对照表和原因）。配置在**产品的插件设置**里改 —— 0.1.7 起插件配置由插件管理器渲染，插件自己不再画设置页。
 
-写给 **DSH 0.1.7** 的，桌面版与命令行版都能用。
+写给 **DSH 0.2.0-rc.1** 的（也在 0.1.7-rc.2 上跑通过），桌面版与命令行版都能用。声明的最低版本是 `engines.dsh: >=0.2.0-rc.1`。
 
 ## 个人使用版本
 
 - 这是**我自己日常在用的那份**，顺手整理出来的，不是团队维护的产品。
 - **不保证在你的 DSH 版本或系统上同样好用**；没有兼容性承诺，issue / PR 随缘看。
 - **后续随缘更新**：我用到什么、烦什么就加什么改什么。想要稳定的东西，建议 fork 自己维护。
-- 当前 `0.3.0-beta.3`：beta 阶段，配置项和默认值还可能变。
+- 当前 `0.3.0-beta.4`：beta 阶段，配置项和默认值还可能变。
 
 ## 谁负责什么（决定这个插件有多小）
 
@@ -52,7 +52,7 @@ New-Item -ItemType Junction -Path "$dp\node_modules\dsh-booster" -Target "C:\pat
 **命令行版**（`dsh web`，profile 是 `web`）：
 
 ```sh
-dsh plugin --profile web add https://github.com/vano1254/dsh-booster/archive/refs/tags/v0.3.0-beta.3.tar.gz
+dsh plugin --profile web add https://github.com/vano1254/dsh-booster/archive/refs/tags/v0.3.0-beta.4.tar.gz
 # 本地开发：源码改动即时可见，仍需重启
 dsh plugin --profile web add link:/absolute/path/to/dsh-booster
 ```
@@ -120,7 +120,7 @@ powershell -ExecutionPolicy Bypass -File (Join-Path $d.FullName 'tools\setup-cod
 
 - **0.3.0-beta.1**（0.1.6 之后）：删掉网页面板、链接跟随、手填地址栏、文档预览路由 —— 那个 997 行的模块整个没了。产品现在有"侧边栏以浏览器模式访问 URL"和"文件引用默认侧边栏预览 + 回合结束的文件改动卡片"。
 - **0.3.0-beta.2**（0.1.7 之后）：删掉自己画的设置页、模块管理器、设置 store、外观、标题栏工具。产品现在有插件管理器的配置表单和"外观"设置。客户端产物 **62.8 KB → 15.2 KB**。
-- **0.3.0-beta.3**：补上引导卡片（见下），修掉一个死机制。
+- **0.3.0-beta.4**：补上引导卡片（见下），修掉一个死机制。
 
 ### 三个我踩过的坑（写在这里免得别人再踩）
 
@@ -139,7 +139,7 @@ dsh-booster: pending (waiting for service: settingsScope)
 
 ## 验证状态（如实说）
 
-在 **DSH 0.1.7-rc.2 桌面版**（`profiles/desktop`）上实测通过：
+在 **DSH 0.1.7-rc.2** 与 **0.2.0-rc.1** 桌面版（`profiles/desktop`）上都实测过：
 
 | 项 | 证据 |
 |---|---|
@@ -150,6 +150,18 @@ dsh-booster: pending (waiting for service: settingsScope)
 | 提示音真的播放 | 删掉缓存后重新生成（时间戳可查）＝ 播放器确实跑过 |
 | 应用启动无异常 | 7 进程全部响应，无新崩溃日志 |
 | 冒烟测试 / CI | **56/56**，ubuntu + windows 双绿 |
+
+在 **0.2.0-rc.1** 上额外核对过（用 npm 上该版本的官方包逐个比对契约）：
+
+| 契约 | 结果 |
+|---|---|
+| 标签页定义（`guide` / `priority` 三值 / `register` 签名） | `tab-registry.d.ts` 与 0.1.7 **同为 10380 字符**，逐项命中 |
+| `sidebar.right.pane.tab` 槽位、`sidebarRightTabs` 服务 | 官方产物里仍在 |
+| 客户端唯一硬依赖 `slots` | 官方 locale 产物的 `inject` 里仍在（文件大小与 0.1.7 相同） |
+| 模块表组装逻辑（识别 `dsh.client` 包） | `dsh-client-modules` **字节完全相同**（41670 B） |
+| 加载握手 `window.__ModuleLoader__.load` | 未变 |
+| 宿主事件 `agent/status` / `agent/error` / `tools/result` | 三者都在（`dsh-agent-loop` / `dsh-tools`） |
+| 宿主半边在新版上实际加载 | 实时查询返回 `include:dsh-booster` / `status: schema`，且升级后一次真实写入仍落了桥接标记 |
 
 **未验证的**：引导页卡片与标签页里的 iframe 在**别人**的机器/组合上必然可用 —— 我这里只能证明它进了产物、注册进槽位、断言通过；以及桌面版 profile 由应用维护，应用可能在退出时重写我手工接的那两处。
 
