@@ -451,14 +451,63 @@ try {
 check('apply() survives a missing sidebarRightTabs registry', waitingError === undefined)
 check(
   'it waits for the service through ctx.inject(["sidebarRightTabs"], …)',
-  same(waiting.records.injected, [['sidebarRightTabs']]),
+  same(waiting.records.injected, [['locale'], ['sidebarRightTabs']]),
 )
 check('it contributes nothing until the service arrives', waiting.records.tabTypes.length === 0)
 
 const lateTabs = []
-waiting.records.injectCallbacks[0]?.({ sidebarRightTabs: { register: (definition) => lateTabs.push(definition) } })
+const tabsInjection = waiting.records.injected.findIndex((names) => names.includes('sidebarRightTabs'))
+waiting.records.injectCallbacks[tabsInjection]?.({ sidebarRightTabs: { register: (definition) => lateTabs.push(definition) } })
 check('and it registers the tab type as soon as the service is published', lateTabs.length === 1)
 check('the late tab type is the same one', lateTabs[0]?.kind === 'booster-vscode' && lateTabs[0]?.id === 'dsh-booster/vscode')
+runCleanups()
+
+banner('client half — the locale service is reached without a property read')
+
+// 0.2.0 throws when a plugin reads a service property it did not declare in `inject`:
+//   Error: cannot get property "locale" without inject
+// Declaring `locale` in `inject` would reintroduce the pending-entry boot failure, so the
+// entry reaches it through optional injection instead. This context reproduces the throw on
+// the property read, so a regression shows up here rather than in the user's console.
+const strictLocale = (() => {
+  const records = { registered: [], bound: [] }
+  const scoped = {
+    locale: {
+      register(ns, dicts) {
+        records.registered.push({ ns, languages: Object.keys(dicts) })
+        return () => {}
+      },
+      bind(ns) {
+        records.bound.push(ns)
+        return (key) => `bound:${key}`
+      },
+    },
+  }
+  const ctx = {
+    slots: { register: () => () => {}, inject: (key, callback) => callback() },
+    effect: (callback) => callback(),
+    sidebarRightTabs: { register: () => () => {} },
+    inject: (names, callback) => {
+      records.injected = names
+      callback(scoped)
+      return () => {}
+    },
+  }
+  Object.defineProperty(ctx, 'locale', {
+    get() {
+      throw new Error('cannot get property "locale" without inject')
+    },
+  })
+  return { ctx, records }
+})()
+const strictClient = loadClient()
+strictClient.module.apply(strictLocale.ctx)
+check('a context that throws on the locale property read is survived', strictClient.logs.length === 0)
+check(
+  'and the dictionaries still register through the injected scope',
+  strictLocale.records.registered.some((entry) => entry.ns === 'dsh-booster' && entry.languages.length === 2),
+)
+check('and the translator binds to that scope', strictLocale.records.bound.includes('dsh-booster'))
 runCleanups()
 
 banner('client half — the panel renders its empty state')

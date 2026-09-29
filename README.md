@@ -16,7 +16,7 @@
 - 这是**我自己日常在用的那份**，顺手整理出来的，不是团队维护的产品。
 - **不保证在你的 DSH 版本或系统上同样好用**；没有兼容性承诺，issue / PR 随缘看。
 - **后续随缘更新**：我用到什么、烦什么就加什么改什么。想要稳定的东西，建议 fork 自己维护。
-- 当前 `0.3.0-beta.4`：beta 阶段，配置项和默认值还可能变。
+- 当前 `0.3.0-beta.5`：beta 阶段，配置项和默认值还可能变。
 
 ## 谁负责什么（决定这个插件有多小）
 
@@ -52,7 +52,7 @@ New-Item -ItemType Junction -Path "$dp\node_modules\dsh-booster" -Target "C:\pat
 **命令行版**（`dsh web`，profile 是 `web`）：
 
 ```sh
-dsh plugin --profile web add https://github.com/vano1254/dsh-booster/archive/refs/tags/v0.3.0-beta.4.tar.gz
+dsh plugin --profile web add https://github.com/vano1254/dsh-booster/archive/refs/tags/v0.3.0-beta.5.tar.gz
 # 本地开发：源码改动即时可见，仍需重启
 dsh plugin --profile web add link:/absolute/path/to/dsh-booster
 ```
@@ -120,9 +120,9 @@ powershell -ExecutionPolicy Bypass -File (Join-Path $d.FullName 'tools\setup-cod
 
 - **0.3.0-beta.1**（0.1.6 之后）：删掉网页面板、链接跟随、手填地址栏、文档预览路由 —— 那个 997 行的模块整个没了。产品现在有"侧边栏以浏览器模式访问 URL"和"文件引用默认侧边栏预览 + 回合结束的文件改动卡片"。
 - **0.3.0-beta.2**（0.1.7 之后）：删掉自己画的设置页、模块管理器、设置 store、外观、标题栏工具。产品现在有插件管理器的配置表单和"外观"设置。客户端产物 **62.8 KB → 15.2 KB**。
-- **0.3.0-beta.4**：补上引导卡片（见下），修掉一个死机制。
+- **0.3.0-beta.5**：补上引导卡片（见下），修掉一个死机制。
 
-### 三个我踩过的坑（写在这里免得别人再踩）
+### 四个我踩过的坑（写在这里免得别人再踩）
 
 **① 客户端的 `inject` 写错 = 应用起不来。** `0.3.0-beta.1` 的客户端写的是 `inject = ['slots', 'settingsScope']` —— 0.1.5 时代的 API。0.1.7 里 **`settingsScope` 已被彻底移除**（12 个官方客户端包里出现 0 次），于是这个客户端条目永远 `pending`，而 DSH 把 pending 当作启动失败：
 
@@ -165,6 +165,8 @@ dsh-booster: pending (waiting for service: settingsScope)
 
 **未验证的**：引导页卡片与标签页里的 iframe 在**别人**的机器/组合上必然可用 —— 我这里只能证明它进了产物、注册进槽位、断言通过；以及桌面版 profile 由应用维护，应用可能在退出时重写我手工接的那两处。
 
+**④ 读未声明的服务属性会抛错。** 0.2.0 里，读一个没有写进自己 `inject` 的服务属性会抛 `cannot get property "locale" without inject`。原来那句 `ctx.locale` 每次启动都抛（被 catch 住了，后果只是失去本地化），而右侧栏服务的属性读取也在反复白抛。现在两者都改成**可选注入 / 服务表读取**。把 `locale` 直接写进 `inject` 也能修，但那就回到坑①：声明的服务一旦不出现就 pending，而 pending 会让应用起不来。
+
 ## 已知限制
 
 - **仅 Windows** 支持右侧 VS Code：宿主用 `powershell.exe` + WMI 创建进程（让 code-server 脱离 DSH 进程树，DSH 重启不会顺带杀掉它），桥接扩展读 `%LOCALAPPDATA%`。提示音三平台都有（`SoundPlayer` / `afplay` / `paplay`）。
@@ -186,7 +188,7 @@ npm run smoke     # 用桩服务跑真实产物，验证两半行为（无需重
 npm run audit     # 发布前审计：本机用户名/家目录/主机名/密钥，非零退出就别 push
 ```
 
-`npm run smoke` 覆盖 **56 项断言**。**第一条就是"客户端声明的 `inject` 必须恰好是 `['slots']`，且每个名字都在实时客户端服务目录里"**（坑①就是这么丢的）。另外覆盖：宿主 `Config` 的四个默认值与 `normalizeConfig` 的收敛规则；桥接标记落盘（写/改文件才落、出错与 `fileOpen: off` 不落、原子写不留 `.tmp`）；提示音合成（合法 RIFF/WAVE、长度自洽、渲染可复现、出错音是另一个音、缓存路径带版本号）与四条规则（短回答不响 / 长回答才响 / 关掉不响 / 出错那次不重复响）；客户端只注册一个标签页类型与一个面板、**那个类型必须带引导条目**（坑②的回归防线）、拿不到标签页注册表时不抛错而是等 `sidebarRightTabs`。
+`npm run smoke` 覆盖 **59 项断言**。**第一条就是"客户端声明的 `inject` 必须恰好是 `['slots']`，且每个名字都在实时客户端服务目录里"**（坑①就是这么丢的）。另外覆盖：宿主 `Config` 的四个默认值与 `normalizeConfig` 的收敛规则；桥接标记落盘（写/改文件才落、出错与 `fileOpen: off` 不落、原子写不留 `.tmp`）；提示音合成（合法 RIFF/WAVE、长度自洽、渲染可复现、出错音是另一个音、缓存路径带版本号）与四条规则（短回答不响 / 长回答才响 / 关掉不响 / 出错那次不重复响）；客户端只注册一个标签页类型与一个面板、**那个类型必须带引导条目**（坑②的回归防线）、拿不到标签页注册表时不抛错而是等 `sidebarRightTabs`。
 
 `lib/` 是**提交进仓库的**，这是有意的：GitHub tarball 安装不会跑构建脚本，提交产物才能保证装完就有 `lib/client.js`。
 

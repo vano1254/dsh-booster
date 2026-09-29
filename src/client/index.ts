@@ -49,23 +49,42 @@ interface ClientContext {
 /**
  * Install the strings and return a translator bound to this plugin's namespace.
  *
- * `locale` is reached optionally: without it the Chinese dictionary is returned verbatim,
- * which is a worse translation but never a broken boot.
+ * `locale` is reached through **optional injection**, never by reading `ctx.locale`. In
+ * 0.2.0 a Cordis context **throws** on a property read for a service that is not in the
+ * plugin's own `inject` list:
+ *
+ * ```
+ * Error: cannot get property "locale" without inject
+ * ```
+ *
+ * Adding `locale` to `inject` would fix the read and reintroduce the failure mode that
+ * once kept this app from booting: a declared service that never arrives leaves the entry
+ * **pending**, and a pending client entry is a boot failure. Optional injection fires when
+ * the service shows up and stays quiet when it never does; until then the Chinese
+ * dictionary is used verbatim, which is a worse translation but never a broken page.
  *
  * @param ctx - the client root context.
- * @returns a translator for this plugin's keys.
+ * @returns a translator for this plugin's keys (delegating once the binding lands).
  */
 function installLocale(ctx: ClientContext): Translate {
+  const fallback: Translate = (key) => (DICT.zh as Record<string, string>)[key] ?? key
+  let bound: Translate | undefined
   try {
-    const locale = ctx.locale
-    if (locale !== undefined && typeof locale.register === 'function' && typeof locale.bind === 'function') {
-      locale.register(LOCALE_NS, { zh: DICT.zh, en: DICT.en })
-      return locale.bind(LOCALE_NS)
-    }
+    if (typeof ctx.inject !== 'function') return fallback
+    ctx.inject(['locale'], (scoped) => {
+      try {
+        const locale = (scoped as ClientContext).locale
+        if (locale === undefined || typeof locale.register !== 'function' || typeof locale.bind !== 'function') return
+        locale.register(LOCALE_NS, { zh: DICT.zh, en: DICT.en })
+        bound = locale.bind(LOCALE_NS)
+      } catch (error) {
+        console.error('[dsh-booster] binding the locale dictionaries failed:', error)
+      }
+    })
   } catch (error) {
-    console.error('[dsh-booster] registering the locale dictionaries failed:', error)
+    console.error('[dsh-booster] requesting the locale service failed:', error)
   }
-  return (key) => (DICT.zh as Record<string, string>)[key] ?? key
+  return (key) => (bound ?? fallback)(key)
 }
 
 /** Inject the panel stylesheet once, if there is a document to put it in. */
@@ -86,25 +105,27 @@ function injectStylesheet(): void {
 /**
  * Read the tab-type registry the right Sidebar publishes.
  *
- * It is reflect-published, so it is read defensively: property access first (a context
- * that does not declare the name throws otherwise), then the service table.
+ * The service table is asked **first**, because a property read for a service this plugin
+ * does not declare in `inject` throws in 0.2.0 (`cannot get property … without inject`).
+ * The property read stays as a guarded fallback for compositions that publish it that way;
+ * whichever answers, the caller ends up with the same face.
  *
  * @param source - the context to read from.
  * @returns the registry, or `undefined`.
  */
 function readTabsFace(source: unknown): { register(definition: unknown): () => void } | undefined {
   try {
-    const viaProperty = (source as { sidebarRightTabs?: { register(definition: unknown): () => void } }).sidebarRightTabs
-    if (viaProperty !== undefined && viaProperty !== null) return viaProperty
-  } catch {
-    // A context that does not declare the name throws on property access.
-  }
-  try {
     const get = (source as { get?(name: string): unknown }).get
     const viaGet = typeof get === 'function' ? get.call(source, 'sidebarRightTabs') : undefined
     if (viaGet !== undefined && viaGet !== null) return viaGet as { register(definition: unknown): () => void }
   } catch {
-    // Same story through the service table.
+    // The service table read can itself refuse on some compositions; try the property.
+  }
+  try {
+    const viaProperty = (source as { sidebarRightTabs?: { register(definition: unknown): () => void } }).sidebarRightTabs
+    if (viaProperty !== undefined && viaProperty !== null) return viaProperty
+  } catch {
+    // Reading an undeclared service property throws; `ctx.get` above is the way in.
   }
   return undefined
 }

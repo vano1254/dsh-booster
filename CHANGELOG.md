@@ -5,6 +5,28 @@ All notable changes to `dsh-booster` are recorded here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0-beta.5] - 2026-09-29
+
+### Fixed
+
+- **A service property read that 0.2.0 forbids.** The client half read `ctx.locale` directly,
+  and 0.2.0 throws for any service property the plugin did not declare in `inject`:
+  `Error: cannot get property "locale" without inject`. The failure was caught, so the panel
+  fell back to the built-in Chinese dictionary instead of crashing — but it printed an error
+  on every boot, and the desktop app's renderer log captured it. `locale` is now reached
+  through **optional injection**. Declaring it in `inject` was not an option: a declared
+  service that never arrives leaves the entry pending, and a pending entry stops the app from
+  booting (that is the 0.3.0-beta.1 failure).
+- The tab-type registry is read from the service table (`ctx.get`) **before** the property
+  access, for the same reason: in 0.2.0 the property read throws first, so every call was
+  taking a caught exception before falling through to the working path.
+
+### Added
+
+- Three smoke assertions that make the property read **throw on purpose** — surviving it,
+  registering both dictionaries through the injected scope, and binding the translator to it.
+  Mutation-checked: disabling the injection turns the suite red. 59 assertions total.
+
 ## [0.3.0-beta.4] - 2026-09-28
 
 ### Compatibility
